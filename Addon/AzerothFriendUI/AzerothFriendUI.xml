@@ -1,0 +1,495 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+
+    <!-- 1. Bot State Frame -->
+    <Frame name="AzerothFriendStateFrame" parent="UIParent" movable="true" enableMouse="true" resizable="true" frameStrata="HIGH" hidden="true">
+        <Size><AbsDimension x="360" y="220"/></Size>
+        <Anchors>
+            <Anchor point="TOPLEFT" x="50" y="-120"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <BackgroundInsets><AbsInset left="4" right="4" top="4" bottom="4"/></BackgroundInsets>
+            <TileSize><AbsValue val="16"/></TileSize>
+            <EdgeSize><AbsValue val="16"/></EdgeSize>
+        </Backdrop>
+        <Frames>
+            <Frame name="AzerothFriendStateFrameTitleBar" parentKey="TitleBar" enableMouse="true">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="4" y="-4"/>
+                    <Anchor point="TOPRIGHT" x="-4" y="-4"/>
+                </Anchors>
+                <Size><AbsDimension x="0" y="24"/></Size>
+                <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background-Dark" tile="true">
+                    <TileSize><AbsValue val="16"/></TileSize>
+                </Backdrop>
+                <Layers>
+                    <Layer level="OVERLAY">
+                        <FontString name="AzerothFriendStateFrameTitle" inherits="GameFontNormal" text="AzerothFriend: Bot State">
+                            <Anchors>
+                                <Anchor point="CENTER"/>
+                            </Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+            </Frame>
+            <Button name="AzerothFriendStateFrameCloseBtn" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT" x="2" y="2"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        self:GetParent():Hide();
+                    </OnClick>
+                </Scripts>
+            </Button>
+            <ScrollFrame name="AzerothFriendStateScrollFrame" inherits="UIPanelScrollFrameTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="12" y="-32"/>
+                    <Anchor point="BOTTOMRIGHT" x="-28" y="10"/>
+                </Anchors>
+                <ScrollChild>
+                    <Frame name="AzerothFriendStateFrameHTML">
+                        <Size><AbsDimension x="310" y="170"/></Size>
+                        <Layers>
+                            <Layer level="ARTWORK">
+                                <FontString name="AzerothFriendStateFrameHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
+                                    <Size><AbsDimension x="310" y="0"/></Size>
+                                    <Anchors>
+                                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                                    </Anchors>
+                                </FontString>
+                            </Layer>
+                        </Layers>
+                    </Frame>
+                </ScrollChild>
+            </ScrollFrame>
+        </Frames>
+    </Frame>
+
+    <!-- 2. Cognitive Thoughts & LLM Reasoning Frame -->
+    <Frame name="AzerothFriendThoughtFrame" parent="UIParent" movable="true" enableMouse="true" resizable="true" frameStrata="HIGH" hidden="true">
+        <Size><AbsDimension x="360" y="170"/></Size>
+        <Anchors>
+            <Anchor point="TOPLEFT" relativeTo="AzerothFriendStateFrame" relativePoint="BOTTOMLEFT" x="0" y="-15"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <BackgroundInsets><AbsInset left="4" right="4" top="4" bottom="4"/></BackgroundInsets>
+            <TileSize><AbsValue val="16"/></TileSize>
+            <EdgeSize><AbsValue val="16"/></EdgeSize>
+        </Backdrop>
+        <Frames>
+            <Frame name="AzerothFriendThoughtFrameTitleBar" parentKey="TitleBar" enableMouse="true">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="4" y="-4"/>
+                    <Anchor point="TOPRIGHT" x="-4" y="-4"/>
+                </Anchors>
+                <Size><AbsDimension x="0" y="24"/></Size>
+                <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background-Dark" tile="true">
+                    <TileSize><AbsValue val="16"/></TileSize>
+                </Backdrop>
+                <Layers>
+                    <Layer level="OVERLAY">
+                        <FontString name="AzerothFriendThoughtFrameTitle" inherits="GameFontNormal" text="AzerothFriend: Cognitive Thoughts">
+                            <Anchors>
+                                <Anchor point="CENTER"/>
+                            </Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+            </Frame>
+            <Button name="AzerothFriendThoughtFrameCloseBtn" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT" x="2" y="2"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        self:GetParent():Hide();
+                    </OnClick>
+                </Scripts>
+            </Button>
+            <ScrollFrame name="AzerothFriendThoughtScrollFrame" inherits="UIPanelScrollFrameTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="12" y="-32"/>
+                    <Anchor point="BOTTOMRIGHT" x="-28" y="10"/>
+                </Anchors>
+                <ScrollChild>
+                    <Frame name="AzerothFriendThoughtFrameHTML">
+                        <Size><AbsDimension x="310" y="120"/></Size>
+                        <Layers>
+                            <Layer level="ARTWORK">
+                                <FontString name="AzerothFriendThoughtFrameHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
+                                    <Size><AbsDimension x="310" y="0"/></Size>
+                                    <Anchors>
+                                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                                    </Anchors>
+                                </FontString>
+                            </Layer>
+                        </Layers>
+                    </Frame>
+                </ScrollChild>
+            </ScrollFrame>
+        </Frames>
+    </Frame>
+
+    <!-- 3. Action Pipeline Frame -->
+    <Frame name="AzerothFriendActionFrame" parent="UIParent" movable="true" enableMouse="true" resizable="true" frameStrata="HIGH" hidden="true">
+        <Size><AbsDimension x="360" y="140"/></Size>
+        <Anchors>
+            <Anchor point="TOPLEFT" relativeTo="AzerothFriendThoughtFrame" relativePoint="BOTTOMLEFT" x="0" y="-15"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <BackgroundInsets><AbsInset left="4" right="4" top="4" bottom="4"/></BackgroundInsets>
+            <TileSize><AbsValue val="16"/></TileSize>
+            <EdgeSize><AbsValue val="16"/></EdgeSize>
+        </Backdrop>
+        <Frames>
+            <Frame name="AzerothFriendActionFrameTitleBar" parentKey="TitleBar" enableMouse="true">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="4" y="-4"/>
+                    <Anchor point="TOPRIGHT" x="-4" y="-4"/>
+                </Anchors>
+                <Size><AbsDimension x="0" y="24"/></Size>
+                <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background-Dark" tile="true">
+                    <TileSize><AbsValue val="16"/></TileSize>
+                </Backdrop>
+                <Layers>
+                    <Layer level="OVERLAY">
+                        <FontString name="AzerothFriendActionFrameTitle" inherits="GameFontNormal" text="AzerothFriend: Action Pipeline">
+                            <Anchors>
+                                <Anchor point="CENTER"/>
+                            </Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+            </Frame>
+            <Button name="AzerothFriendActionFrameCloseBtn" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT" x="2" y="2"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        self:GetParent():Hide();
+                    </OnClick>
+                </Scripts>
+            </Button>
+            <ScrollFrame name="AzerothFriendActionScrollFrame" inherits="UIPanelScrollFrameTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="12" y="-32"/>
+                    <Anchor point="BOTTOMRIGHT" x="-28" y="10"/>
+                </Anchors>
+                <ScrollChild>
+                    <Frame name="AzerothFriendActionFrameHTML">
+                        <Size><AbsDimension x="310" y="90"/></Size>
+                        <Layers>
+                            <Layer level="ARTWORK">
+                                <FontString name="AzerothFriendActionFrameHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
+                                    <Size><AbsDimension x="310" y="0"/></Size>
+                                    <Anchors>
+                                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                                    </Anchors>
+                                </FontString>
+                            </Layer>
+                        </Layers>
+                    </Frame>
+                </ScrollChild>
+            </ScrollFrame>
+        </Frames>
+    </Frame>
+
+    <!-- 4. Environment & Nearby Entities Frame -->
+    <Frame name="AzerothFriendEnvFrame" parent="UIParent" movable="true" enableMouse="true" resizable="true" frameStrata="HIGH" hidden="true">
+        <Size><AbsDimension x="360" y="180"/></Size>
+        <Anchors>
+            <Anchor point="TOPLEFT" relativeTo="AzerothFriendStateFrame" relativePoint="TOPRIGHT" x="25" y="0"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <BackgroundInsets><AbsInset left="4" right="4" top="4" bottom="4"/></BackgroundInsets>
+            <TileSize><AbsValue val="16"/></TileSize>
+            <EdgeSize><AbsValue val="16"/></EdgeSize>
+        </Backdrop>
+        <Frames>
+            <Frame name="AzerothFriendEnvFrameTitleBar" parentKey="TitleBar" enableMouse="true">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="4" y="-4"/>
+                    <Anchor point="TOPRIGHT" x="-4" y="-4"/>
+                </Anchors>
+                <Size><AbsDimension x="0" y="24"/></Size>
+                <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background-Dark" tile="true">
+                    <TileSize><AbsValue val="16"/></TileSize>
+                </Backdrop>
+                <Layers>
+                    <Layer level="OVERLAY">
+                        <FontString name="AzerothFriendEnvFrameTitle" inherits="GameFontNormal" text="AzerothFriend: Nearby Environment">
+                            <Anchors>
+                                <Anchor point="CENTER"/>
+                            </Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+            </Frame>
+            <Button name="AzerothFriendEnvFrameCloseBtn" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT" x="2" y="2"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        self:GetParent():Hide();
+                    </OnClick>
+                </Scripts>
+            </Button>
+            <ScrollFrame name="AzerothFriendEnvScrollFrame" inherits="UIPanelScrollFrameTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="12" y="-32"/>
+                    <Anchor point="BOTTOMRIGHT" x="-28" y="10"/>
+                </Anchors>
+                <ScrollChild>
+                    <Frame name="AzerothFriendEnvFrameHTML">
+                        <Size><AbsDimension x="310" y="130"/></Size>
+                        <Layers>
+                            <Layer level="ARTWORK">
+                                <FontString name="AzerothFriendEnvFrameHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
+                                    <Size><AbsDimension x="310" y="0"/></Size>
+                                    <Anchors>
+                                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                                    </Anchors>
+                                </FontString>
+                            </Layer>
+                        </Layers>
+                    </Frame>
+                </ScrollChild>
+            </ScrollFrame>
+        </Frames>
+    </Frame>
+
+    <!-- 5. Cognitive Mindset & Debug Telemetry Frame -->
+    <Frame name="AzerothFriendMemoryFrame" parent="UIParent" movable="true" enableMouse="true" resizable="true" frameStrata="HIGH" hidden="true">
+        <Size><AbsDimension x="360" y="220"/></Size>
+        <Anchors>
+            <Anchor point="TOPLEFT" relativeTo="AzerothFriendEnvFrame" relativePoint="BOTTOMLEFT" x="0" y="-15"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <BackgroundInsets><AbsInset left="4" right="4" top="4" bottom="4"/></BackgroundInsets>
+            <TileSize><AbsValue val="16"/></TileSize>
+            <EdgeSize><AbsValue val="16"/></EdgeSize>
+        </Backdrop>
+        <Frames>
+            <Frame name="AzerothFriendMemoryFrameTitleBar" parentKey="TitleBar" enableMouse="true">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="4" y="-4"/>
+                    <Anchor point="TOPRIGHT" x="-4" y="-4"/>
+                </Anchors>
+                <Size><AbsDimension x="0" y="24"/></Size>
+                <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background-Dark" tile="true">
+                    <TileSize><AbsValue val="16"/></TileSize>
+                </Backdrop>
+                <Layers>
+                    <Layer level="OVERLAY">
+                        <FontString name="AzerothFriendMemoryFrameTitle" inherits="GameFontNormal" text="AzerothFriend: Mindset &amp; Debug Telemetry">
+                            <Anchors>
+                                <Anchor point="CENTER"/>
+                            </Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+            </Frame>
+            <Button name="AzerothFriendMemoryFrameCloseBtn" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT" x="2" y="2"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        self:GetParent():Hide();
+                    </OnClick>
+                </Scripts>
+            </Button>
+            <ScrollFrame name="AzerothFriendMemoryScrollFrame" inherits="UIPanelScrollFrameTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="12" y="-32"/>
+                    <Anchor point="BOTTOMRIGHT" x="-28" y="10"/>
+                </Anchors>
+                <ScrollChild>
+                    <Frame name="AzerothFriendMemoryFrameHTML">
+                        <Size><AbsDimension x="310" y="170"/></Size>
+                        <Layers>
+                            <Layer level="ARTWORK">
+                                <FontString name="AzerothFriendMemoryFrameHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
+                                    <Size><AbsDimension x="310" y="0"/></Size>
+                                    <Anchors>
+                                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                                    </Anchors>
+                                </FontString>
+                            </Layer>
+                        </Layers>
+                    </Frame>
+                </ScrollChild>
+            </ScrollFrame>
+        </Frames>
+    </Frame>
+
+    <!-- 6. Unified Tabbed Master HUD Frame -->
+    <Frame name="AzerothFriendMasterFrame" parent="UIParent" movable="true" enableMouse="true" resizable="true" frameStrata="HIGH" hidden="true">
+        <Size><AbsDimension x="660" y="440"/></Size>
+        <Anchors>
+            <Anchor point="CENTER" x="0" y="50"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <BackgroundInsets><AbsInset left="4" right="4" top="4" bottom="4"/></BackgroundInsets>
+            <TileSize><AbsValue val="16"/></TileSize>
+            <EdgeSize><AbsValue val="16"/></EdgeSize>
+        </Backdrop>
+        <Frames>
+            <!-- Title Bar -->
+            <Frame name="AzerothFriendMasterFrameTitleBar" parentKey="TitleBar" enableMouse="true">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="4" y="-4"/>
+                    <Anchor point="TOPRIGHT" x="-4" y="-4"/>
+                </Anchors>
+                <Size><AbsDimension x="0" y="26"/></Size>
+                <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background-Dark" tile="true">
+                    <TileSize><AbsValue val="16"/></TileSize>
+                </Backdrop>
+                <Layers>
+                    <Layer level="OVERLAY">
+                        <FontString name="AzerothFriendMasterFrameTitle" inherits="GameFontNormal" text="AzerothFriend: Companion HUD &amp; Context">
+                            <Anchors>
+                                <Anchor point="LEFT" x="12" y="0"/>
+                            </Anchors>
+                        </FontString>
+                        <FontString name="AzerothFriendMasterFrameSubtitle" inherits="GameFontHighlightSmall" text="|cff00ccff[Zero-Token Diagnostics]|r">
+                            <Anchors>
+                                <Anchor point="RIGHT" x="-32" y="0"/>
+                            </Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+            </Frame>
+            <Button name="AzerothFriendMasterFrameCloseBtn" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT" x="2" y="2"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        self:GetParent():Hide();
+                    </OnClick>
+                </Scripts>
+            </Button>
+
+            <!-- Navigation Tabs -->
+            <Button name="AzerothFriendMasterTab1" inherits="UIPanelButtonTemplate" text="Context">
+                <Size><AbsDimension x="130" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="8" y="-34"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab2" inherits="UIPanelButtonTemplate" text="Mindset/Debug">
+                <Size><AbsDimension x="115" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab1" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab3" inherits="UIPanelButtonTemplate" text="Actions">
+                <Size><AbsDimension x="95" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab2" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab4" inherits="UIPanelButtonTemplate" text="Thoughts">
+                <Size><AbsDimension x="95" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab3" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab5" inherits="UIPanelButtonTemplate" text="Bot API v1">
+                <Size><AbsDimension x="100" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab4" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+
+            <!-- Content Area -->
+            <ScrollFrame name="AzerothFriendMasterScrollFrame" inherits="UIPanelScrollFrameTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" x="12" y="-62"/>
+                    <Anchor point="BOTTOMRIGHT" x="-28" y="38"/>
+                </Anchors>
+                <ScrollChild>
+                    <Frame name="AzerothFriendMasterHTML">
+                        <Size><AbsDimension x="600" y="330"/></Size>
+                        <Layers>
+                            <Layer level="ARTWORK">
+                                <FontString name="AzerothFriendMasterHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
+                                    <Size><AbsDimension x="600" y="0"/></Size>
+                                    <Anchors>
+                                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                                    </Anchors>
+                                </FontString>
+                            </Layer>
+                        </Layers>
+                    </Frame>
+                </ScrollChild>
+            </ScrollFrame>
+
+            <!-- Bottom Remote Control Bar: Tactical Action Modes & Utility -->
+            <Button name="AzerothFriendBtnModeCombat" inherits="UIPanelButtonTemplate" text="Combat">
+                <Size><AbsDimension x="62" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="BOTTOMLEFT" x="8" y="8"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendBtnModeTravel" inherits="UIPanelButtonTemplate" text="Travel">
+                <Size><AbsDimension x="58" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendBtnModeCombat" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendBtnModeIdle" inherits="UIPanelButtonTemplate" text="Idle">
+                <Size><AbsDimension x="48" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendBtnModeTravel" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendBtnModeSocial" inherits="UIPanelButtonTemplate" text="Social">
+                <Size><AbsDimension x="58" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendBtnModeIdle" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendBtnSync" inherits="UIPanelButtonTemplate" text="Sync">
+                <Size><AbsDimension x="50" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendBtnModeSocial" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendBtnDebug" inherits="UIPanelButtonTemplate" text="Debug">
+                <Size><AbsDimension x="54" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendBtnSync" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
+
+            <!-- Autonomy switch: owner opt-in for self-directed play (server-confirmed) -->
+            <Button name="AzerothFriendBtnAutonomy" inherits="UIPanelButtonTemplate" text="Auto: OFF">
+                <Size><AbsDimension x="72" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="BOTTOMRIGHT" x="-10" y="8"/>
+                </Anchors>
+            </Button>
+
+            <!-- Claim switch: companion agency lock (indefinite until released) -->
+            <Button name="AzerothFriendBtnClaim" inherits="UIPanelButtonTemplate" text="Claim: OFF">
+                <Size><AbsDimension x="72" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="RIGHT" relativeTo="AzerothFriendBtnAutonomy" relativePoint="LEFT" x="-6" y="0"/>
+                </Anchors>
+            </Button>
+
+            <!-- Thinking cadence switch: Low (20s) | Normal (10s) | High (4s) -->
+            <Button name="AzerothFriendBtnThinking" inherits="UIPanelButtonTemplate" text="Think: NORM">
+                <Size><AbsDimension x="80" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="RIGHT" relativeTo="AzerothFriendBtnClaim" relativePoint="LEFT" x="-6" y="0"/>
+                </Anchors>
+            </Button>
+        </Frames>
+    </Frame>
+
+</Ui>

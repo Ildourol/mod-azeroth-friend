@@ -1,0 +1,910 @@
+#
+# AzerothFriend Module Configuration
+#
+# Next-generation autonomous AI companion module for AzerothCore
+# Bridging Python LLMs (OpenAI, Ollama, OpenRouter) with in-game agency
+#
+
+###############################################################################
+# ESSENTIAL SETTINGS
+###############################################################################
+
+#
+#   AzerothFriend.Enable
+#       Enable or disable the AzerothFriend module in C++
+#       Default: 1 (enabled)
+#
+AzerothFriend.Enable = 1
+
+#
+#   AzerothFriend.Debug
+#       Enable verbose debug logging for actions, sensor snapshots, and SQL
+#       Default: 0 (disabled)
+#
+AzerothFriend.Debug = 0
+
+#
+#   AzerothFriend.ControlledBots
+#       Comma-separated list of bot names that this module manages.
+#       If left empty, all bots registered in `azeroth_friend_bots` table are managed.
+#       Default: "Friendbot,Ollamatest"
+#
+AzerothFriend.ControlledBots = "Friendbot,Ollamatest"
+
+#
+#   AzerothFriend.MaxControlledBots / AzerothFriend.ControlledBots.MaxCount
+#       The maximum number of controlled bots that can run concurrently under the agent module.
+#       If more bot names are listed in AzerothFriend.ControlledBots, only the first N bots
+#       are loaded and managed (e.g. with default 1, only the first bot in the list is used).
+#       Default: 1
+#
+AzerothFriend.MaxControlledBots = 1
+AzerothFriend.ControlledBots.MaxCount = 1
+
+#
+#   AzerothFriend.TickIntervalMs
+#       Polling frequency in C++ world ticks for executing pending actions (milliseconds)
+#       Default: 500
+#
+AzerothFriend.TickIntervalMs = 500
+
+###############################################################################
+# LIGHT ENVIRONMENT & SENSORY SYSTEM (RAM + SQL)
+###############################################################################
+
+#
+#   AzerothFriend.Environment.DeltaDistance
+#       Minimum movement distance (in yards) before writing an updated position to SQL.
+#       Prevents spamming SQL when standing still or making micro-adjustments.
+#       Default: 5.0
+#
+AzerothFriend.Environment.DeltaDistance = 5.0
+
+#
+#   AzerothFriend.Environment.MaxVisibleEntities
+#       Maximum visible nearby entities (NPCs, objects, nodes) included in the
+#       environment snapshot JSON. Minimizes prompt token consumption by 80%+.
+#       Default: 6
+#
+AzerothFriend.Environment.MaxVisibleEntities = 20
+
+#
+#   AzerothFriend.Environment.TelemetryIntervalSeconds
+#       How often the live HUD telemetry (state, surroundings, spells) is re-sent to
+#       the owner while the companion is standing still. The heavier world scan and
+#       SQL write stay behind the movement/health delta gate; this only controls how
+#       quickly the panel reflects what is already known.
+#       Default: 3
+#
+AzerothFriend.Environment.TelemetryIntervalSeconds = 3
+
+#
+#   AzerothFriend.Environment.ScanRadius
+#       Radius in yards to scan for visible interactables in Line of Sight.
+#       Default: 30.0
+#
+AzerothFriend.Environment.ScanRadius = 30.0
+
+#
+#   AzerothFriend.Environment.StorageMode
+#       Snapshot storage destination for bot environmental awareness.
+#       1 = In-memory RAM ring buffer (zero disk I/O, ultra-fast, recommended)
+#       2 = SQL persistent table `azeroth_friend_environment`
+#       Default: 1
+#
+AzerothFriend.Environment.StorageMode = 1
+
+#
+#   AzerothFriend.Environment.RamMaximumSnapshots
+#       Maximum snapshots kept per bot in RAM ring buffer when StorageMode = 1.
+#       Default: 3
+#
+AzerothFriend.Environment.RamMaximumSnapshots = 3
+
+#
+#   AzerothFriend.Environment.SqlMaximumSnapshots
+#       Maximum snapshots kept per bot in MySQL when StorageMode = 2.
+#       Default: 10
+#
+AzerothFriend.Environment.SqlMaximumSnapshots = 10
+
+#
+#   AzerothFriend.Environment.SnapshotTTLMinutes
+#       Lifespan in minutes for environment snapshots before automatic cleanup.
+#       Default: 30
+#
+AzerothFriend.Environment.SnapshotTTLMinutes = 30
+
+#
+#   AzerothFriend.Environment.SnapshotLineOfSight
+#       Check Line of Sight (LoS) for visible objects/NPCs before adding to snapshot.
+#       Default: 1
+#
+AzerothFriend.Environment.SnapshotLineOfSight = 1
+
+###############################################################################
+# SELF-CONTEXT & BOT CLAIMING (AUTONOMOUS BOT AGENCY)
+###############################################################################
+
+#
+#   AzerothFriend.SelfContext.Enable
+#       Collect companion gear ilvl, combat spells, consumables, bags, and active
+#       quests into self_context JSON to provide full character self-awareness.
+#       Default: 1 (enabled)
+#
+AzerothFriend.SelfContext.Enable = 1
+
+###############################################################################
+# TOKEN OPTIMIZATION & MULTI-ACTION PLANNING
+###############################################################################
+
+#
+#   AzerothFriend.MultiActionPlan.Enable
+#       Enable Multi-Action Plan Batching.
+#       Allows the LLM to output composite action plans in a single call
+#       instead of issuing 1 API call per physical micro-step.
+#       Default: 1 (enabled)
+#
+AzerothFriend.MultiActionPlan.Enable = 1
+
+#
+#   AzerothFriend.MultiActionPlan.MaxSteps
+#       Maximum number of sequential steps allowed in a single compound action plan.
+#       Default: 5
+#
+AzerothFriend.MultiActionPlan.MaxSteps = 5
+
+#
+#   AzerothFriend.SessionContextReuse.Enable
+#       Enable session context and prompt prefix reuse in Python bridge to leverage
+#       provider prompt caching (saves up to 80% on input tokens).
+#       Default: 1 (enabled)
+#
+AzerothFriend.SessionContextReuse.Enable = 1
+
+###############################################################################
+# MOD-LLM-CHATTER INTEGRATION & TOKEN SHARING
+###############################################################################
+
+#
+#   AzerothFriend.Chat.DelegateAmbientToLLMChatter (Python bridge)
+#       Who authors the companion's spoken lines. With delegation on, mod-llm-chatter owns
+#       every line and the companion only reasons and acts (owner commands are still
+#       acknowledged deterministically). With delegation off, the companion writes its own
+#       one-sentence line for non-command events; the bridge routes that line through
+#       mod-llm-chatter's message queue, so one subsystem still performs the delivery.
+#       0 = companion writes its own lines (extra tokens per ambient plan)
+#       1 = mod-llm-chatter authors all ambient banter
+#       Default: 1
+#
+AzerothFriend.Chat.DelegateAmbientToLLMChatter = 1
+
+#
+#   AzerothFriend.Chatter.TokenSharing (Python bridge)
+#       Enable compound dialogue + physical action generation. When enabled, AzerothFriend
+#       generates both actions and dialogue in 1 LLM request and routes speech directly
+#       into mod-llm-chatter's message queue, saving 50-70% tokens.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Chatter.TokenSharing = 1
+
+#
+#   AzerothFriend.Chatter.SensoryReuse (Python bridge)
+#       Read perceptual events recorded by mod-llm-chatter (chests, gathering nodes,
+#       corpse loot, low HP rest) and trigger companion actions with 0 additional LLM tokens.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Chatter.SensoryReuse = 1
+
+#
+#   AzerothFriend.Chatter.EstimatedTokensPerCall (Python bridge)
+#       Estimated tokens saved per co-processed or reused interaction.
+#       Default: 1200
+#
+AzerothFriend.Chatter.EstimatedTokensPerCall = 1200
+
+#
+#   AzerothFriend.Chat.DefaultChannel
+#       Default speech channel for bot companion dialogue ('party', 'say', 'whisper')
+#       Default: "party"
+#
+AzerothFriend.Chat.DefaultChannel = "party"
+
+#
+#   AzerothFriend.Chat.AcknowledgeCommands (Python bridge)
+#       Answer an owner command immediately and deterministically, without waiting
+#       for the language model: a short spoken line when a cast resolves, and a
+#       plain reason when it cannot (unknown spell, ambiguous destination).
+#       This is what makes the companion visibly responsive in about a second
+#       instead of staying silent for the duration of a slow model call.
+#       1 = on, 0 = off
+#       Default: 1
+#
+AzerothFriend.Chat.AcknowledgeCommands = 1
+
+###############################################################################
+# DUAL-MIND ARCHITECTURE & COMBAT REFLEXES
+###############################################################################
+
+#
+#   AzerothFriend.DualMind.CombatReflexes
+#       Enable fast C++ reflex engine for real-time sub-second combat rotations.
+#       Offloads micro-spells and facing to PlayerbotAI/C++ reflexes, while LLM
+#       handles high-level cognitive goals and priorities.
+#       Default: 1 (enabled)
+#
+AzerothFriend.DualMind.CombatReflexes = 1
+
+#
+#   AzerothFriend.DualMind.EmergencyThresholdPct
+#       Health percentage threshold to trigger an emergency defensive reflex
+#       (instant healthstone, potion, defensive cooldowns).
+#       Default: 20
+#
+AzerothFriend.DualMind.EmergencyThresholdPct = 20
+
+###############################################################################
+# STUCK DETECTION & RECOVERY
+###############################################################################
+
+#
+#   AzerothFriend.StuckDetection.Enable
+#       Enable automatic stuck detection during movement actions.
+#       Default: 1 (enabled)
+#
+AzerothFriend.StuckDetection.Enable = 1
+
+#
+#   AzerothFriend.StuckDetection.TimeoutSeconds
+#       Seconds without measurable movement progress before triggering recovery.
+#       Default: 4
+#
+AzerothFriend.StuckDetection.TimeoutSeconds = 4
+
+#
+#   AzerothFriend.StuckDetection.Strategy
+#       Recovery strategy when stuck: "jump_repath_teleport" or "repath_only"
+#       Default: "jump_repath_teleport"
+#
+AzerothFriend.StuckDetection.Strategy = "jump_repath_teleport"
+
+###############################################################################
+# MEMORY & AFFINITY SYSTEM
+###############################################################################
+
+#
+#   AzerothFriend.Memory.AffinitySystem
+#       Track player affinity (-100 to +100) based on shared victories, gifts,
+#       and saves, altering bot demeanor and loyalty.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Memory.AffinitySystem = 1
+
+#
+#   AzerothFriend.Memory.EpisodicMemory
+#       Track episodic memories in SQL for long-term narrative continuity.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Memory.EpisodicMemory = 1
+
+#
+#   AzerothFriend.Memory.MaxMemoriesPerPrompt
+#       Maximum relevant episodic memories injected into the planning prompt.
+#       Default: 4
+#
+AzerothFriend.Memory.MaxMemoriesPerPrompt = 4
+
+###############################################################################
+# AUTONOMOUS DOWNTIME & ECONOMY SCALING
+###############################################################################
+
+#
+#   AzerothFriend.Autonomous.AutoRepairSell
+#       Allow idle bots to visit vendors, repair armor, and sell grey junk.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Autonomous.AutoRepairSell = 1
+
+#
+#   AzerothFriend.Autonomous.AutoEquipUpgrades
+#       Allow bots to auto-equip item level upgrades found in bags.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Autonomous.AutoEquipUpgrades = 1
+
+#
+#   AzerothFriend.Autonomous.DowntimeInns
+#       Allow bots to rest, sit, and craft in inns when idle out of group.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Autonomous.DowntimeInns = 1
+
+###############################################################################
+# MINDSET LATENCY & COGNITIVE INERTIA (PREVENTING AI ADHD)
+###############################################################################
+
+#
+#   AzerothFriend.Mindset.Enable
+#       Enable cognitive mindset commitment latency. Prevents the companion bot
+#       from jittering or thrashing between goals every few seconds due to ambient events.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Mindset.Enable = 1
+
+#
+#   AzerothFriend.Mindset.CommitmentSeconds
+#       Duration in seconds that a bot commits to its active mindset (e.g. RESTING,
+#       LOOTING, EXPLORING, FOLLOWING). During this window, low-priority ambient
+#       events will not derail the bot's goal.
+#       Emergency events (player_command, combat_enter, health_critical) immediately
+#       preempt and break the commitment window.
+#       Default: 15
+#
+AzerothFriend.Mindset.CommitmentSeconds = 15
+
+#
+#   AzerothFriend.Mindset.AllowOpportunistic
+#       Allow small opportunistic physical actions (such as looting a nearby corpse
+#       within 5 yards) while in a travel/following mindset without breaking commitment.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Mindset.AllowOpportunistic = 1
+
+###############################################################################
+# DATABASE CONNECTION (FOR PYTHON BRIDGE)
+###############################################################################
+
+AzerothFriend.Database.Host = "127.0.0.1"
+AzerothFriend.Database.Port = 3306
+AzerothFriend.Database.User = "acore"
+AzerothFriend.Database.Password = "acore"
+AzerothFriend.Database.CharactersDB = "acore_characters"
+AzerothFriend.Database.WorldDB = "acore_world"
+
+#
+#   AzerothFriend.SpellSync.Enable
+#       Enable automatic caching and indexing of AzerothCore spells for AI lookups
+#       Default: 1 (enabled)
+#
+AzerothFriend.SpellSync.Enable = 1
+
+#
+#   AzerothFriend.SpellSync.DbcPath
+#       Path to the client Spell.dbc the server already loads. Names from the DBC
+#       fill in spells that the world database's spell_dbc table does not describe
+#       (most repacks ship only a few thousand of ~50,000 spells), which is what
+#       lets natural language like "cast fireball" resolve for every spellbook.
+#       Leave empty to auto-detect ../data/dbc/Spell.dbc relative to this config.
+#       Default: "" (auto-detect)
+#
+AzerothFriend.SpellSync.DbcPath = ""
+
+###############################################################################
+# LLM ENDPOINT SETTINGS (PYTHON BRIDGE)
+###############################################################################
+
+#
+#   AzerothFriend.LLM.Provider
+#       Supported: "openai", "ollama", "openrouter", "anthropic"
+#       Default: "openai"
+#
+AzerothFriend.LLM.Provider = "openai"
+
+#
+#   AzerothFriend.LLM.BaseUrl
+#       Endpoint URL for OpenAI-compatible completions.
+#       For OpenAI: https://api.openai.com/v1
+#       For Ollama: http://localhost:11434/v1
+#       For OpenRouter: https://openrouter.ai/api/v1
+#       Default: "https://api.openai.com/v1"
+#
+AzerothFriend.LLM.BaseUrl = "https://api.openai.com/v1"
+
+#
+#   AzerothFriend.LLM.ApiKey
+#       API key for provider (or "ollama" for local Ollama)
+#
+AzerothFriend.LLM.ApiKey = "YOUR_API_KEY_HERE"
+
+#
+#   AzerothFriend.LLM.Model
+#       Model identifier to use
+#       Default: "gpt-4o-mini"
+#
+AzerothFriend.LLM.Model = "gpt-4o-mini"
+
+#
+#   AzerothFriend.LLM.MaxTokens
+#       Maximum tokens generated per planning call
+#       Default: 800
+#
+AzerothFriend.LLM.MaxTokens = 800
+
+#
+#   AzerothFriend.LLM.Temperature
+#       Sampling temperature (0.0 = deterministic, 1.0 = creative)
+#       Default: 0.7
+#
+AzerothFriend.LLM.Temperature = 0.7
+
+###############################################################################
+# OPENAI THINKING & REASONING MODEL SETTINGS
+###############################################################################
+
+#
+#   AzerothFriend.LLM.Thinking.Mode
+#       Controls when reasoning is applied for OpenAI thinking models:
+#       Auto = Apply reasoning based on model capability and enabled AutoKinds
+#       On   = Force reasoning for all planning requests if supported
+#       Off  = Disable reasoning (for always-on models like o1/o3, sends lowest effort 'low')
+#       Default: "Auto"
+#
+AzerothFriend.LLM.Thinking.Mode = "Auto"
+
+#
+#   AzerothFriend.LLM.Thinking.AutoDetect
+#       Automatically inspect model name to identify legacy thinking models (o1, o3-mini, o4),
+#       newer thinking models (gpt-5, gpt-5-nano, gpt-5-mini), or standard models.
+#       0 = Disabled (only apply if Thinking.Mode = On or ModelType override set)
+#       1 = Enabled (automatic detection)
+#       Default: 1
+#
+AzerothFriend.LLM.Thinking.AutoDetect = 1
+
+#
+#   AzerothFriend.LLM.Thinking.ModelType
+#       Manual model classification override. Useful when using custom proxies, local gateways,
+#       or non-standard fine-tune model names.
+#       Options:
+#         "Auto"           - Detect automatically from model name
+#         "LegacyThinking" - Force legacy o-series behavior (always-on, no custom temp, max_completion_tokens)
+#         "NewerThinking"  - Force modern reasoning behavior (e.g. gpt-5-nano, supports 'minimal', customizable temp)
+#         "StandardChat"   - Force standard chat completions without reasoning parameters
+#       Default: "Auto"
+#
+AzerothFriend.LLM.Thinking.ModelType = "Auto"
+
+#
+#   AzerothFriend.LLM.Thinking.Effort
+#       Requested reasoning effort level:
+#       "minimal" - Supported on newer models like gpt-5-nano (fastest, ideal for companion bots)
+#       "low"     - Low reasoning effort (lowest supported level on o1/o3 series)
+#       "medium"  - Balanced reasoning
+#       "high"    - Deep analytical reasoning
+#       Note: "minimal" collapses to "low" on legacy o-series models.
+#       Default: "low"
+#
+AzerothFriend.LLM.Thinking.Effort = "low"
+
+#
+#   AzerothFriend.LLM.Thinking.TokenReserve
+#       Extra output token budget added to max_completion_tokens when thinking is active,
+#       preventing internal reasoning tokens from truncating the visible JSON action plan.
+#       Default: 1024
+#
+AzerothFriend.LLM.Thinking.TokenReserve = 1024
+
+#
+#   AzerothFriend.LLM.Thinking.AutoKinds
+#       Comma-separated list of event types that trigger thinking when Mode = Auto.
+#       High-cognition tactical/social events receive reasoning, while routine ambient ticks skip it.
+#       Options: player_command, combat_enter, duel_requested, trade_requested, plan_interrupted
+#       Default: "player_command,combat_enter,duel_requested,trade_requested,plan_interrupted"
+#
+AzerothFriend.LLM.Thinking.AutoKinds = "player_command,combat_enter,duel_requested,trade_requested,plan_interrupted"
+
+###############################################################################
+# CHATTER & DIALOGUE LISTENING (UNIFIED BRIDGE)
+###############################################################################
+
+#
+#   AzerothFriend.Chatter.HearOtherBots
+#       Enable or disable hearing and remembering dialogue spoken by other
+#       playerbots in your party, raid, or nearby world.
+#       When enabled, companion overhears teammate bot banter and can reference it.
+#       When disabled, companion only focuses on what the master player says.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Chatter.HearOtherBots = 1
+
+#
+#   AzerothFriend.Chatter.HearNPCs
+#       Enable or disable overhearing nearby NPC monster says and yells.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Chatter.HearNPCs = 1
+
+#
+#   AzerothFriend.Chatter.MaxRecentDialogue
+#       Maximum number of recent overheard lines to retain in cognitive context.
+#       Default: 6
+#
+AzerothFriend.Chatter.MaxRecentDialogue = 6
+
+###############################################################################
+# ACTION EXECUTION LAYER (PLAYERBOTS CONTROL LEASE)
+###############################################################################
+
+#
+#   AzerothFriend.Control.Lease.Enable
+#       Master switch for the companion control lease. When enabled, the module
+#       snapshots the bot's playerbot strategies, suspends autonomous roaming while
+#       a plan executes, and restores the exact previous strategies afterwards.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Control.Lease.Enable = 1
+
+#
+#   AzerothFriend.Control.Lease.StrategyMode
+#       How the bot's own AI is suspended during a companion step:
+#         "suspend"      - clear the non-combat engine (no roaming/questing/travel)
+#                          and reset the combat engine to class defaults (recommended)
+#         "clear"        - clear every engine; the companion drives everything
+#         "passive_stay" - keep both engines but force +passive,+stay (timid mode)
+#       Default: "suspend"
+#
+AzerothFriend.Control.Lease.StrategyMode = "suspend"
+
+#
+#   AzerothFriend.Control.Lease.RefreshSeconds
+#       Lease lifetime in seconds. It is refreshed every action tick while a plan
+#       runs and released automatically when the plan finishes or stalls.
+#       Default: 20
+#
+AzerothFriend.Control.Lease.RefreshSeconds = 20
+
+#
+#   AzerothFriend.ActionStep.TimeoutSeconds
+#       Maximum time a single action step may take before it is failed (movement
+#       arrival, target kill, wait). Failures are recorded with a reason instead of
+#       silently reporting success.
+#       Default: 12
+#
+AzerothFriend.ActionStep.TimeoutSeconds = 12
+
+#
+#   AzerothFriend.ActionStep.RetryCount
+#       Stuck recovery attempts allowed per movement step before the step fails.
+#       Default: 1
+#
+AzerothFriend.ActionStep.RetryCount = 1
+
+###############################################################################
+# PLAYERBOTS NATIVE ACTION PASSTHROUGH
+###############################################################################
+
+#
+#   AzerothFriend.PlayerbotActions.AllowRawPassthrough
+#       Allow the LLM/GM to invoke ANY action registered by mod-playerbots through
+#       the "playerbot_action" and "playerbot_command" steps. Names are validated
+#       against the bot's own AiObjectContext before execution.
+#       Default: 0 (disabled; typed Bot API capabilities remain available)
+#
+AzerothFriend.PlayerbotActions.AllowRawPassthrough = 0
+
+#
+#   AzerothFriend.PlayerbotActions.Denylist
+#       Comma separated native action names that are never executed through the raw
+#       passthrough (logouts, resets, destructive inventory and group commands...).
+#
+AzerothFriend.PlayerbotActions.Denylist = "logout,reset,leave,uninvite,destroy,cheat,repop,teleport,guild remove,guild demote,guild leave,wipe,bg join,bg leave,lfg leave,self resurrect"
+
+#
+#   AzerothFriend.PlayerbotActions.DeniedCommands
+#       Comma separated playerbot chat commands that are never forwarded through the
+#       raw command passthrough.
+#
+AzerothFriend.PlayerbotActions.DeniedCommands = "logout,reset,leave,destroy,cheat,repop,teleport,uninvite,wipe,debug,cdebug,cs,guild remove,guild demote,guild leave"
+
+###############################################################################
+# VERSIONED PLAYERBOT SEMANTIC BOT API
+###############################################################################
+
+# Enable the typed Bot API v1 contract and server-side authority enforcement.
+AzerothFriend.BotApi.Enable = 1
+
+# Permit consequential capabilities only when their queue provenance identifies
+# a current owner command. Autonomous plans cannot elevate this authority.
+AzerothFriend.BotApi.OwnerTierEnable = 1
+
+# Export the bot's live AiObjectContext actions and strategies as owner-only,
+# untyped diagnostic capabilities. Denied actions remain unsafe and unavailable.
+AzerothFriend.BotApi.NativeDiscoveryEnable = 1
+
+# Maximum native capability names included in one owner-command prompt.
+AzerothFriend.BotApi.MaxPromptCapabilities = 90
+
+###############################################################################
+# COMPANION SPEECH FALLBACK
+###############################################################################
+
+#
+#   AzerothFriend.Chat.SayFallback
+#       All spoken dialogue normally belongs to mod-llm-chatter. Enable this to let
+#       the companion speak its own "say" action steps when mod-llm-chatter is
+#       absent or disabled, so dialogue-driven plans stay visible to the player.
+#       Default: 0 (disabled - mod-llm-chatter owns all speech)
+#
+AzerothFriend.Chat.SayFallback = 0
+
+#
+#   AzerothFriend.Chat.SayFallbackChannel
+#       Channel used by the fallback speech: "say", "party" or "whisper".
+#       Default: "party"
+#
+AzerothFriend.Chat.SayFallbackChannel = "party"
+
+###############################################################################
+# AUTONOMOUS AMBIENT ACTION TICKS
+###############################################################################
+
+#
+#   AzerothFriend.Autonomy.Enable
+#       Emit low-priority idle/loot/health events so the companion acts on its own
+#       (loot nearby corpses, rest at low health, follow the master, keep exploring)
+#       instead of waiting to be told.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Autonomy.Enable = 1
+
+#
+#   AzerothFriend.Autonomy.TickSeconds
+#       Seconds between autonomous idle ticks per bot (minimum 3).
+#       Default: 5
+#
+AzerothFriend.Autonomy.TickSeconds = 5
+
+#
+#   AzerothFriend.Autonomy.ThinkingCadence
+#       Idle thought generation cadence tier: "low" (20s), "normal" (10s), "high" (4s).
+#       Controls how often idle background thoughts are updated when no nearby event drags it.
+#       Default: "normal"
+#
+AzerothFriend.Autonomy.ThinkingCadence = "normal"
+
+#
+#   AzerothFriend.Autonomy.Modes
+#       Bot modes (azeroth_friend_bots.mode) allowed to act autonomously.
+#       Default: "companion,guard,autonomous"
+#
+AzerothFriend.Autonomy.Modes = "companion,guard,autonomous"
+
+#
+#   AzerothFriend.Autonomy.LootRadius
+#       Radius in yards searched for lootable corpses when emitting loot_available.
+#       Default: 20
+#
+AzerothFriend.Autonomy.LootRadius = 20
+
+#
+#   AzerothFriend.Autonomy.HealthPct
+#       Health percentage below which a health_critical event is queued (at most once
+#       every 30 seconds per bot).
+#       Default: 40
+#
+AzerothFriend.Autonomy.HealthPct = 40
+
+#
+#   AzerothFriend.Autonomy.CombatTicks
+#       Also emit idle ticks while the bot is in combat. Keep disabled so combat is
+#       handled by playerbots reflexes and only strategic events interrupt it.
+#       Default: 0 (disabled)
+#
+AzerothFriend.Autonomy.CombatTicks = 0
+
+#
+#   AzerothFriend.Autonomy.HeartbeatSeconds (Python bridge)
+#       When a bot's situation has not changed at all, the bridge still re-plans the
+#       focused goal at most this often. Smaller values react faster but spend tokens
+#       on an unchanged world. Clamped to a minimum of 30 seconds.
+#       Default: 60
+#
+AzerothFriend.Autonomy.HeartbeatSeconds = 60
+
+#
+#   AzerothFriend.Autonomy.MinimumPlanSeconds (Python bridge)
+#       Hard floor between two autonomous plans for the same bot, even when the world
+#       changed. Owner commands (.af cast, chat) are never delayed by this.
+#       Clamped to a minimum of 3 seconds.
+#       Default: 10
+#
+AzerothFriend.Autonomy.MinimumPlanSeconds = 10
+
+###############################################################################
+# GOAL AUTO-GENERATION (AUTHENTIC WOW PLAYER ARCHETYPES)
+###############################################################################
+
+#
+#   AzerothFriend.Goal.AutoGenerate.Enable (Python bridge)
+#       Automatically generate an authentic World of Warcraft goal pair
+#       (short-term and long-term) only once when a controlled bot is first registered
+#       and has empty goals in the database.
+#       0 = disabled
+#       1 = enabled
+#       Default: 1
+#
+AzerothFriend.Goal.AutoGenerate.Enable = 1
+
+#
+#   AzerothFriend.Goal.AutoGenerate.Categories (Python bridge)
+#       Comma-separated list of abstract WoW player archetypes to draw goals from:
+#       Options: mixed (random selection), xp, money, loot, exploration
+#       Default: "mixed"
+#
+AzerothFriend.Goal.AutoGenerate.Categories = "mixed"
+
+###############################################################################
+# RAM-FIRST LIVE STATE & COMPACT PLANNING CONTEXT
+###############################################################################
+
+#
+#   AzerothFriend.LiveState.Enable
+#       Publish live world state over a loopback TCP socket to the Python bridge
+#       on a dedicated background worker thread. The world thread only copies
+#       value snapshots; it never performs socket I/O and never waits.
+#       When disabled the module falls back to the SQL compatibility path.
+#       Default: 1 (enabled)
+#
+AzerothFriend.LiveState.Enable = 1
+
+#
+#   AzerothFriend.LiveState.Host / Port
+#       Loopback endpoint for the live-state listener. Bind to 127.0.0.1 only.
+#       Default: "127.0.0.1" / 8377
+#
+AzerothFriend.LiveState.Host = "127.0.0.1"
+AzerothFriend.LiveState.Port = 8377
+
+#
+#   AzerothFriend.LiveState.Secret
+#       Shared secret authenticating the single bridge connection. Generate a
+#       random value once and keep it out of version control. The secret is never
+#       written to any log. When empty the listener refuses to start.
+#       Default: "149e35cbeeb623521413e4f6f00f44d45475774fd92746d3"
+#
+AzerothFriend.LiveState.Secret = ""
+
+#
+#   AzerothFriend.LiveState.HeartbeatSeconds
+#       Heartbeat cadence. The bridge treats live state as stale after five
+#       seconds without a valid heartbeat and suspends new LLM planning until
+#       fresh state arrives (direct commands and native playerbot behaviour
+#       continue).
+#       Default: 2
+#
+AzerothFriend.LiveState.HeartbeatSeconds = 2
+
+#
+#   AzerothFriend.LiveState.PublishIntervalMs
+#       How often the worker drains coalesced state sections to the socket.
+#       Replaceable state is coalesced to the latest value per section.
+#       Default: 250
+#
+AzerothFriend.LiveState.PublishIntervalMs = 250
+
+#
+#   AzerothFriend.LiveState.FrameCapBytes
+#       Maximum accepted protocol frame size. Larger or malformed frames are
+#       rejected and the connection is dropped for a clean reconnect.
+#       Default: 262144 (256 KiB)
+#
+AzerothFriend.LiveState.FrameCapBytes = 262144
+
+#
+#   AzerothFriend.LiveState.QueueLimit
+#       Bounded outbound frame queue. When the socket stalls the oldest
+#       replaceable state frame is dropped; the bridge detects the sequence gap
+#       and requests a complete refresh.
+#       Default: 1024
+#
+AzerothFriend.LiveState.QueueLimit = 1024
+
+#
+#   AzerothFriend.LiveState.RequireFresh
+#       Suspend new LLM planning when the live state is not fresh. Native
+#       playerbot behaviour and direct owner commands keep working.
+#       Default: 1
+#
+AzerothFriend.LiveState.RequireFresh = 1
+
+#
+#   AzerothFriend.LiveState.ShadowMode
+#       Stage 2 rollout: keep publishing live state for comparison while live
+#       reads still come from SQL. Used for validation before switching over.
+#       Default: 0
+#
+AzerothFriend.LiveState.ShadowMode = 0
+
+#
+#   AzerothFriend.Context.Compact.Enable
+#       Build one self-contained planning context instead of replaying the whole
+#       conversation plus every subsystem section.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Context.Compact.Enable = 1
+
+#
+#   AzerothFriend.Context.TargetInputTokens / MaxInputTokens
+#       Target and hard ceiling for estimated input tokens across the system and
+#       user messages. Estimates are labelled separately from provider usage.
+#       Optional history, chat and peripheral entities are trimmed first; owner
+#       instructions and required action schemas are never silently truncated.
+#       Default: 2000 / 5000
+#
+AzerothFriend.Context.TargetInputTokens = 2000
+AzerothFriend.Context.MaxInputTokens = 5000
+
+#
+#   AzerothFriend.Context.IncludeLegacyMemory (Python bridge)
+#       Pre-upgrade azeroth_friend_memory rows are legacy diagnostic history.
+#       Structured summaries replace them in prompts; enable this only to review
+#       the old prose explicitly.
+#       Default: 0 (excluded from automatic prompts)
+#
+AzerothFriend.Context.IncludeLegacyMemory = 0
+
+#
+#   AzerothFriend.Context.SqlCompatibilityMode (Python bridge)
+#       Explicit rollback switch. When 1 the bridge reads durable SQL state and
+#       the module keeps its synchronous read paths, instead of refusing to plan
+#       without fresh RAM state. Never switched silently.
+#       Default: 0
+#
+AzerothFriend.Context.SqlCompatibilityMode = 0
+
+#
+#   AzerothFriend.Cache.BotRefreshSeconds
+#       Slow cadence for the asynchronous durable identity/goal cache refresh.
+#       The cache is also invalidated immediately on control revision changes.
+#       Default: 15
+#
+AzerothFriend.Cache.BotRefreshSeconds = 15
+
+#
+#   AzerothFriend.Summary.IntervalSeconds
+#       Dirty structured summaries are flushed at this cadence, plus immediately
+#       on goal transitions, logout and orderly shutdown.
+#       Default: 60
+#
+AzerothFriend.Summary.IntervalSeconds = 60
+
+#
+#   AzerothFriend.Environment.CheckpointSeconds
+#       Environment SQL checkpoint cadence. The environment table is recovery and
+#       debug data only; live reads come from RAM.
+#       Default: 60
+#
+AzerothFriend.Environment.CheckpointSeconds = 60
+
+#
+#   AzerothFriend.Telemetry.CheckpointSeconds
+#       Aggregated telemetry counters are flushed only when they changed.
+#       Default: 10
+#
+AzerothFriend.Telemetry.CheckpointSeconds = 10
+
+#
+#   AzerothFriend.Diagnostics.RetentionDays
+#       Terminal event/action detail retention. Cleanup runs in bounded batches
+#       and never touches active queues or companion/character data.
+#       Default: 7
+#
+AzerothFriend.Diagnostics.RetentionDays = 7
+
+#
+#   AzerothFriend.Chatter.ConsumerOverlapSeconds / FreshnessSeconds (Python bridge)
+#       Incremental chatter ingestion: the consumer advances on source ids with a
+#       bounded overlap so delivery/status changes are still observed, and skips
+#       stale backlog after a restart.
+#       Default: 30 / 90
+#
+AzerothFriend.Chatter.ConsumerOverlapSeconds = 30
+AzerothFriend.Chatter.FreshnessSeconds = 90
+
+#
+#   AzerothFriend.Rollout.Stage
+#       1 = instrument only, 2 = shadow transport/caches, 3 = live RAM reads,
+#       4 = summaries, checkpointing and retention enabled.
+#       Default: 3
+#
+AzerothFriend.Rollout.Stage = 3

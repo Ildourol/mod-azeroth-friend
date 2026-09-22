@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local configuration and backups (never expose secrets / API keys)
+conf/mod_azeroth_friend.conf
+conf/*.bak*
+*.bak
+
+# Documentation and tests (kept local, excluded from public distribution)
+docs/
+tools/tests/
+
+# AI Agent workflows and guidelines (internal)
+.agents/
+AGENTS.md
+
+# Local scratch scripts and database fixes
+data/sql/updates/

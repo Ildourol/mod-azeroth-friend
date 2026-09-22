@@ -1,0 +1,212 @@
+{
+  "fireball": [
+    {"spell_id": 133, "name": "Fireball", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 30, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 143, "name": "Fireball", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 6, "mana_cost": 45, "cast_time_ms": 2000, "cooldown_ms": 0},
+    {"spell_id": 145, "name": "Fireball", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 12, "mana_cost": 65, "cast_time_ms": 2500, "cooldown_ms": 0},
+    {"spell_id": 3140, "name": "Fireball", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 18, "mana_cost": 100, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 8437, "name": "Fireball", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 24, "mana_cost": 140, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 8438, "name": "Fireball", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 30, "mana_cost": 180, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 8439, "name": "Fireball", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 36, "mana_cost": 220, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 10148, "name": "Fireball", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 42, "mana_cost": 260, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 10149, "name": "Fireball", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 48, "mana_cost": 305, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 10150, "name": "Fireball", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 54, "mana_cost": 350, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 10151, "name": "Fireball", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 60, "mana_cost": 395, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 25306, "name": "Fireball", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 66, "mana_cost": 425, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 27070, "name": "Fireball", "rank_text": "Rank 13", "rank_num": 13, "spell_level": 70, "mana_cost": 465, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 38692, "name": "Fireball", "rank_text": "Rank 14", "rank_num": 14, "spell_level": 74, "mana_cost": 490, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 42832, "name": "Fireball", "rank_text": "Rank 15", "rank_num": 15, "spell_level": 78, "mana_cost": 520, "cast_time_ms": 3500, "cooldown_ms": 0},
+    {"spell_id": 42833, "name": "Fireball", "rank_text": "Rank 16", "rank_num": 16, "spell_level": 80, "mana_cost": 550, "cast_time_ms": 3500, "cooldown_ms": 0}
+  ],
+  "frostbolt": [
+    {"spell_id": 116, "name": "Frostbolt", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 25, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 205, "name": "Frostbolt", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 8, "mana_cost": 35, "cast_time_ms": 1800, "cooldown_ms": 0},
+    {"spell_id": 837, "name": "Frostbolt", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 14, "mana_cost": 50, "cast_time_ms": 2200, "cooldown_ms": 0},
+    {"spell_id": 7322, "name": "Frostbolt", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 20, "mana_cost": 75, "cast_time_ms": 2600, "cooldown_ms": 0},
+    {"spell_id": 8406, "name": "Frostbolt", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 26, "mana_cost": 105, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 8407, "name": "Frostbolt", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 32, "mana_cost": 130, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 8408, "name": "Frostbolt", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 38, "mana_cost": 160, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 10179, "name": "Frostbolt", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 44, "mana_cost": 195, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 10180, "name": "Frostbolt", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 50, "mana_cost": 225, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 10181, "name": "Frostbolt", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 56, "mana_cost": 260, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 25304, "name": "Frostbolt", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 60, "mana_cost": 290, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 27071, "name": "Frostbolt", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 68, "mana_cost": 315, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 27072, "name": "Frostbolt", "rank_text": "Rank 13", "rank_num": 13, "spell_level": 70, "mana_cost": 340, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 38697, "name": "Frostbolt", "rank_text": "Rank 14", "rank_num": 14, "spell_level": 73, "mana_cost": 355, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 42841, "name": "Frostbolt", "rank_text": "Rank 15", "rank_num": 15, "spell_level": 77, "mana_cost": 380, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 42842, "name": "Frostbolt", "rank_text": "Rank 16", "rank_num": 16, "spell_level": 80, "mana_cost": 410, "cast_time_ms": 3000, "cooldown_ms": 0}
+  ],
+  "arcane intellect": [
+    {"spell_id": 1459, "name": "Arcane Intellect", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 60, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1460, "name": "Arcane Intellect", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 14, "mana_cost": 150, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1461, "name": "Arcane Intellect", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 28, "mana_cost": 300, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10156, "name": "Arcane Intellect", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 42, "mana_cost": 520, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10157, "name": "Arcane Intellect", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 56, "mana_cost": 830, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 27126, "name": "Arcane Intellect", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 70, "mana_cost": 1050, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 42995, "name": "Arcane Intellect", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 80, "mana_cost": 1200, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "flash heal": [
+    {"spell_id": 2061, "name": "Flash Heal", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 20, "mana_cost": 125, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 9472, "name": "Flash Heal", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 26, "mana_cost": 155, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 9473, "name": "Flash Heal", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 32, "mana_cost": 185, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 9474, "name": "Flash Heal", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 38, "mana_cost": 215, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 10915, "name": "Flash Heal", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 44, "mana_cost": 265, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 10916, "name": "Flash Heal", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 50, "mana_cost": 315, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 10917, "name": "Flash Heal", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 56, "mana_cost": 380, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 25233, "name": "Flash Heal", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 60, "mana_cost": 415, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 25235, "name": "Flash Heal", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 66, "mana_cost": 470, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 27243, "name": "Flash Heal", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 70, "mana_cost": 510, "cast_time_ms": 1500, "cooldown_ms": 0},
+    {"spell_id": 48070, "name": "Flash Heal", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 79, "mana_cost": 650, "cast_time_ms": 1500, "cooldown_ms": 0}
+  ],
+  "greater heal": [
+    {"spell_id": 2060, "name": "Greater Heal", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 40, "mana_cost": 370, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 10963, "name": "Greater Heal", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 46, "mana_cost": 455, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 10964, "name": "Greater Heal", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 52, "mana_cost": 545, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 10965, "name": "Greater Heal", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 58, "mana_cost": 655, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 25314, "name": "Greater Heal", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 60, "mana_cost": 710, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 25210, "name": "Greater Heal", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 63, "mana_cost": 755, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 25213, "name": "Greater Heal", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 68, "mana_cost": 825, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 48062, "name": "Greater Heal", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 74, "mana_cost": 910, "cast_time_ms": 3000, "cooldown_ms": 0},
+    {"spell_id": 48063, "name": "Greater Heal", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 80, "mana_cost": 980, "cast_time_ms": 3000, "cooldown_ms": 0}
+  ],
+  "renew": [
+    {"spell_id": 139, "name": "Renew", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 8, "mana_cost": 30, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6074, "name": "Renew", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 14, "mana_cost": 65, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6075, "name": "Renew", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 20, "mana_cost": 105, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6076, "name": "Renew", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 26, "mana_cost": 140, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6077, "name": "Renew", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 32, "mana_cost": 175, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6078, "name": "Renew", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 38, "mana_cost": 215, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10927, "name": "Renew", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 44, "mana_cost": 265, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10928, "name": "Renew", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 50, "mana_cost": 315, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10929, "name": "Renew", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 56, "mana_cost": 365, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25315, "name": "Renew", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 60, "mana_cost": 410, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25221, "name": "Renew", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 65, "mana_cost": 435, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25222, "name": "Renew", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 70, "mana_cost": 480, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48067, "name": "Renew", "rank_text": "Rank 13", "rank_num": 13, "spell_level": 75, "mana_cost": 530, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48068, "name": "Renew", "rank_text": "Rank 14", "rank_num": 14, "spell_level": 80, "mana_cost": 570, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "power word: shield": [
+    {"spell_id": 17, "name": "Power Word: Shield", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 6, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 592, "name": "Power Word: Shield", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 12, "mana_cost": 80, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 600, "name": "Power Word: Shield", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 18, "mana_cost": 130, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 3747, "name": "Power Word: Shield", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 24, "mana_cost": 175, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 6065, "name": "Power Word: Shield", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 30, "mana_cost": 225, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 6066, "name": "Power Word: Shield", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 36, "mana_cost": 275, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 10898, "name": "Power Word: Shield", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 42, "mana_cost": 330, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 10899, "name": "Power Word: Shield", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 48, "mana_cost": 390, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 10900, "name": "Power Word: Shield", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 54, "mana_cost": 460, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 10901, "name": "Power Word: Shield", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 60, "mana_cost": 500, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 25217, "name": "Power Word: Shield", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 65, "mana_cost": 550, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 25218, "name": "Power Word: Shield", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 70, "mana_cost": 600, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 48065, "name": "Power Word: Shield", "rank_text": "Rank 13", "rank_num": 13, "spell_level": 75, "mana_cost": 680, "cast_time_ms": 0, "cooldown_ms": 4000},
+    {"spell_id": 48066, "name": "Power Word: Shield", "rank_text": "Rank 14", "rank_num": 14, "spell_level": 80, "mana_cost": 750, "cast_time_ms": 0, "cooldown_ms": 4000}
+  ],
+  "power word: fortitude": [
+    {"spell_id": 1243, "name": "Power Word: Fortitude", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 60, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1244, "name": "Power Word: Fortitude", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 12, "mana_cost": 140, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1245, "name": "Power Word: Fortitude", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 24, "mana_cost": 280, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 2791, "name": "Power Word: Fortitude", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 36, "mana_cost": 490, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10937, "name": "Power Word: Fortitude", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 48, "mana_cost": 770, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10938, "name": "Power Word: Fortitude", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 60, "mana_cost": 1100, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25389, "name": "Power Word: Fortitude", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 70, "mana_cost": 1350, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48161, "name": "Power Word: Fortitude", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 80, "mana_cost": 1600, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "shadow word: pain": [
+    {"spell_id": 589, "name": "Shadow Word: Pain", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 4, "mana_cost": 25, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 594, "name": "Shadow Word: Pain", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 10, "mana_cost": 50, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 970, "name": "Shadow Word: Pain", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 18, "mana_cost": 95, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 992, "name": "Shadow Word: Pain", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 26, "mana_cost": 145, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 2767, "name": "Shadow Word: Pain", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 34, "mana_cost": 205, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10892, "name": "Shadow Word: Pain", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 42, "mana_cost": 265, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10893, "name": "Shadow Word: Pain", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 50, "mana_cost": 330, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 10894, "name": "Shadow Word: Pain", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 58, "mana_cost": 410, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25367, "name": "Shadow Word: Pain", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 60, "mana_cost": 450, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25368, "name": "Shadow Word: Pain", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 65, "mana_cost": 490, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48124, "name": "Shadow Word: Pain", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 70, "mana_cost": 530, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48125, "name": "Shadow Word: Pain", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 80, "mana_cost": 610, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "taunt": [
+    {"spell_id": 355, "name": "Taunt", "rank_text": "", "rank_num": 1, "spell_level": 10, "mana_cost": 0, "cast_time_ms": 0, "cooldown_ms": 8000}
+  ],
+  "heroic strike": [
+    {"spell_id": 78, "name": "Heroic Strike", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 284, "name": "Heroic Strike", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 8, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 285, "name": "Heroic Strike", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 16, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1608, "name": "Heroic Strike", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 24, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11564, "name": "Heroic Strike", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 32, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11565, "name": "Heroic Strike", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 40, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11566, "name": "Heroic Strike", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 48, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11567, "name": "Heroic Strike", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 56, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25286, "name": "Heroic Strike", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 60, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 29707, "name": "Heroic Strike", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 70, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 47449, "name": "Heroic Strike", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 75, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 47450, "name": "Heroic Strike", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 79, "mana_cost": 15, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "sinister strike": [
+    {"spell_id": 1752, "name": "Sinister Strike", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1757, "name": "Sinister Strike", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 6, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1758, "name": "Sinister Strike", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 14, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1759, "name": "Sinister Strike", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 22, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 1760, "name": "Sinister Strike", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 30, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 8621, "name": "Sinister Strike", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 38, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11293, "name": "Sinister Strike", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 46, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11294, "name": "Sinister Strike", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 54, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 26861, "name": "Sinister Strike", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 62, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 26862, "name": "Sinister Strike", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 70, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48637, "name": "Sinister Strike", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 76, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48638, "name": "Sinister Strike", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 80, "mana_cost": 45, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "stealth": [
+    {"spell_id": 1784, "name": "Stealth", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 0, "cast_time_ms": 0, "cooldown_ms": 10000}
+  ],
+  "eviscerate": [
+    {"spell_id": 2098, "name": "Eviscerate", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 1, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6760, "name": "Eviscerate", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 8, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6761, "name": "Eviscerate", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 16, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 6762, "name": "Eviscerate", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 24, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 8623, "name": "Eviscerate", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 32, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 8624, "name": "Eviscerate", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 40, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11299, "name": "Eviscerate", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 48, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 11300, "name": "Eviscerate", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 56, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 26865, "name": "Eviscerate", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 60, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 26866, "name": "Eviscerate", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 70, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48667, "name": "Eviscerate", "rank_text": "Rank 11", "rank_num": 11, "spell_level": 74, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48668, "name": "Eviscerate", "rank_text": "Rank 12", "rank_num": 12, "spell_level": 79, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "blessing of might": [
+    {"spell_id": 19740, "name": "Blessing of Might", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 4, "mana_cost": 35, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 19834, "name": "Blessing of Might", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 12, "mana_cost": 60, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 19835, "name": "Blessing of Might", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 22, "mana_cost": 90, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 19836, "name": "Blessing of Might", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 32, "mana_cost": 130, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 19837, "name": "Blessing of Might", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 42, "mana_cost": 175, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 19838, "name": "Blessing of Might", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 52, "mana_cost": 225, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 25291, "name": "Blessing of Might", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 60, "mana_cost": 260, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 27140, "name": "Blessing of Might", "rank_text": "Rank 8", "rank_num": 8, "spell_level": 70, "mana_cost": 310, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48931, "name": "Blessing of Might", "rank_text": "Rank 9", "rank_num": 9, "spell_level": 75, "mana_cost": 350, "cast_time_ms": 0, "cooldown_ms": 0},
+    {"spell_id": 48932, "name": "Blessing of Might", "rank_text": "Rank 10", "rank_num": 10, "spell_level": 80, "mana_cost": 400, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "blessing of kings": [
+    {"spell_id": 20217, "name": "Blessing of Kings", "rank_text": "", "rank_num": 1, "spell_level": 20, "mana_cost": 150, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "tranquility": [
+    {"spell_id": 740, "name": "Tranquility", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 30, "mana_cost": 450, "cast_time_ms": 0, "cooldown_ms": 600000},
+    {"spell_id": 8918, "name": "Tranquility", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 40, "mana_cost": 620, "cast_time_ms": 0, "cooldown_ms": 600000},
+    {"spell_id": 9862, "name": "Tranquility", "rank_text": "Rank 3", "rank_num": 3, "spell_level": 50, "mana_cost": 830, "cast_time_ms": 0, "cooldown_ms": 600000},
+    {"spell_id": 9863, "name": "Tranquility", "rank_text": "Rank 4", "rank_num": 4, "spell_level": 60, "mana_cost": 1090, "cast_time_ms": 0, "cooldown_ms": 600000},
+    {"spell_id": 26983, "name": "Tranquility", "rank_text": "Rank 5", "rank_num": 5, "spell_level": 70, "mana_cost": 1380, "cast_time_ms": 0, "cooldown_ms": 600000},
+    {"spell_id": 48446, "name": "Tranquility", "rank_text": "Rank 6", "rank_num": 6, "spell_level": 75, "mana_cost": 1600, "cast_time_ms": 0, "cooldown_ms": 600000},
+    {"spell_id": 48447, "name": "Tranquility", "rank_text": "Rank 7", "rank_num": 7, "spell_level": 80, "mana_cost": 1850, "cast_time_ms": 0, "cooldown_ms": 480000}
+  ],
+  "tremor totem": [
+    {"spell_id": 8143, "name": "Tremor Totem", "rank_text": "", "rank_num": 1, "spell_level": 18, "mana_cost": 60, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "duel": [
+    {"spell_id": 7266, "name": "Duel", "rank_text": "", "rank_num": 1, "spell_level": 1, "mana_cost": 0, "cast_time_ms": 0, "cooldown_ms": 0}
+  ],
+  "ice block": [
+    {"spell_id": 45438, "name": "Ice Block", "rank_text": "", "rank_num": 1, "spell_level": 30, "mana_cost": 0, "cast_time_ms": 0, "cooldown_ms": 300000}
+  ],
+  "divine shield": [
+    {"spell_id": 642, "name": "Divine Shield", "rank_text": "Rank 1", "rank_num": 1, "spell_level": 34, "mana_cost": 0, "cast_time_ms": 0, "cooldown_ms": 300000},
+    {"spell_id": 1020, "name": "Divine Shield", "rank_text": "Rank 2", "rank_num": 2, "spell_level": 68, "mana_cost": 0, "cast_time_ms": 0, "cooldown_ms": 300000}
+  ]
+}
