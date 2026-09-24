@@ -37,7 +37,6 @@ CATALOG: Dict[str, Tuple[str, str, str, bool]] = {
     "aoe": ("combat", "", "Area damage assist.", False),
     "pull": ("combat", "", "Pull the current target.", False),
     "pull_back": ("combat", "", "Tank pulls mob with ranged skill and returns to starting point.", False),
-    "wait_for_attack": ("combat", "[seconds]", "Wait N seconds before attacking or healing in combat.", False),
     "mark_rti": ("combat", "", "Mark lowest health combat attacker with raid target icon.", False),
     "behind": ("combat", "", "Move behind target's back (rear flank).", False),
     "tank_face": ("combat", "", "Face target away from ranged group members.", False),
@@ -247,7 +246,7 @@ COMMAND_INDEX: Dict[str, List[str]] = {
         "runaway", "grind", "wander", "travel_to", "taxi", "summon", "disperse", "disperse_disable",
     ],
     "combat": [
-        "attack", "attack_my_target", "assist", "aoe", "pull", "pull_back", "wait_for_attack",
+        "attack", "attack_my_target", "assist", "aoe", "pull", "pull_back",
         "cc", "focus", "threat", "boost", "tank_face", "behind", "mark_rti",
         "pet_attack", "cast", "cast_on", "spell_exclude", "use_trinket", "racial",
     ],
@@ -359,7 +358,6 @@ ALIASES: Dict[str, str] = {
 
     # Combat & Strategy aliases
     "pullback": "pull_back",
-    "waitforattack": "wait_for_attack",
     "markrti": "mark_rti",
     "ss": "spell_exclude",
     "learn": "trainer_learn",
@@ -403,7 +401,6 @@ ALIASES: Dict[str, str] = {
     "combat_aoe": "aoe",
     "combat_pull": "pull",
     "combat_pull_back": "pull_back",
-    "combat_wait_for_attack": "wait_for_attack",
     "combat_mark_rti": "mark_rti",
     "combat_behind": "behind",
     "combat_tank_face": "tank_face",
@@ -607,10 +604,6 @@ def validate_step(step: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optio
     elif name == "attack_my_target":
         params["master_target"] = True
         params["override"] = True
-
-    elif name == "wait_for_attack":
-        secs = _as_int(params.get("seconds", params.get("time", 5))) or 5
-        params["seconds"] = max(1, min(60, secs))
 
     elif name == "cast":
         spell_id = require_int("spellid") or require_int("spell_id")

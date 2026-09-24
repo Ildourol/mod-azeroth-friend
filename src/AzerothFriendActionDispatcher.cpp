@@ -1820,17 +1820,6 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
         return true;
     }
 
-    if (actionType == "wait_for_attack")
-    {
-        uint32 secs = ExtractJsonUint(paramsJson, "seconds", 5);
-        bool ok = AzerothFriendPlayerbotActions::DoCommand(bot, "wait for attack time " + std::to_string(secs));
-        if (!ok)
-            return Fail("wait_for_attack_failed");
-        plan.kind = AFStepKind::Immediate;
-        plan.result = Payload("\"wait_for_attack\":" + std::to_string(secs) + ",\"ok\":" + (ok ? "true" : "false"));
-        return true;
-    }
-
     if (actionType == "mark_rti")
     {
         bool ok = AzerothFriendPlayerbotActions::DoCommand(bot, "mark rti");

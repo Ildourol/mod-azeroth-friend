@@ -197,7 +197,6 @@ namespace AzerothFriendActionRegistry
                 { "aoe",                 "combat", "",                       "Area damage assist.", "dps aoe", false },
                 { "pull",                "combat", "",                       "Pull the current target.", "pull my target", false },
                 { "pull_back",           "combat", "",                       "Tank pulls mob with ranged skill and returns to starting point.", "pull back", false },
-                { "wait_for_attack",     "combat", "[seconds]",              "Wait N seconds before attacking or healing in combat.", "wait for attack", false },
                 { "mark_rti",            "combat", "",                       "Mark lowest health combat attacker with raid target icon.", "mark rti", false },
                 { "behind",              "combat", "",                       "Move behind target's back (rear flank).", "behind", false },
                 { "tank_face",           "combat", "",                       "Face target away from ranged group members.", "tank face", false },
