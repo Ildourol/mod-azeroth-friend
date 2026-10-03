@@ -15,11 +15,18 @@ local function settings()
     return AzerothFriendUIDB.goalPanels[key]
 end
 local function refresh()
-    if not body then return end
+    local actionText = ''
+    if state.suggested_actions and state.suggested_actions ~= '' then
+        actionText = '\n\nSuggested Actions (AI Recommendation):\n' .. state.suggested_actions
+        if state.action_summary and state.action_summary ~= '' then
+            actionText = actionText .. ' (' .. state.action_summary .. ')'
+        end
+    end
     body:SetText('Companion: ' .. (state.bot or 'unavailable') .. '\nAutonomy: ' ..
         (state.enabled and 'ON' or 'OFF') .. ' | Goal: ' .. (state.status or 'Unknown') ..
         '\n\nCore purpose (long-term):\n' .. (state.long_goal or 'not set') ..
         '\n\n' .. (state.goal or '') .. '\n' .. (state.progress or '') .. '\n' .. (state.result or '') ..
+        actionText ..
         '\n\nLast five actions (dispatch is not completion):\n' .. (state.history or '') ..
         '\nNearby players:\n' .. (state.players or ''))
     body:SetHeight(math.max(300, body:GetStringHeight() + 20))
@@ -80,15 +87,16 @@ local function create()
     longGoalEdit:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
     local controls = {{'Set goal', function() send('goal set ' .. goalEdit:GetText()); goalEdit:ClearFocus() end},
         {'Set purpose', function() send('goal longterm ' .. longGoalEdit:GetText()); longGoalEdit:ClearFocus() end},
+        {'Suggest', function() if AFRequestSuggestions then AFRequestSuggestions('both') else send('cast af_suggest_both') end end},
         {'Enable', function() send(state.enabled and 'autonomy off' or 'autonomy on') end},
         {'Pause', function() send('goal pause') end},
         {'Resume', function() send('goal resume') end}, {'Complete', function() send('goal complete') end},
         {'Clear', function() send('goal clear') end}, {'Sync', function() send('inspect') end}}
     for i, control in ipairs(controls) do
         local button = CreateFrame('Button', nil, panel, 'UIPanelButtonTemplate')
-        button:SetWidth(68); button:SetHeight(24); button:SetPoint('TOPLEFT', 14+(i-1)*72, -112)
+        button:SetWidth(60); button:SetHeight(24); button:SetPoint('TOPLEFT', 14+(i-1)*64, -112)
         button:SetText(control[1]); button:SetScript('OnClick', control[2])
-        if i == 3 then autonomyButton = button end
+        if i == 4 then autonomyButton = button end
     end
     local scroll = CreateFrame('ScrollFrame', 'AzerothFriendGoalScroll', panel, 'UIPanelScrollFrameTemplate')
     scroll:SetPoint('TOPLEFT', 18, -146); scroll:SetPoint('BOTTOMRIGHT', -32, 20)
@@ -115,6 +123,19 @@ function AFHandleSlash(input)
     if command == 'goals' then
         create(); if panel:IsShown() then panel:Hide() else panel:Show(); send('inspect') end
         settings().visible=panel:IsShown(); return true
+    end
+    if command == 'suggest' or command == 'generate' then
+        local scope = rest and rest:lower() or "both"
+        if scope == "" then scope = "both" end
+        if AFRequestSuggestions then AFRequestSuggestions(scope) else send('cast af_suggest_' .. scope) end
+        return true
+    end
+    if command == 'grind' or command == 'hunt' or command == 'roam' or command == 'wander' then
+        local radius = tonumber(rest:match("(%d+)")) or 60
+        if radius < 10 then radius = 10 end
+        if radius > 100 then radius = 100 end
+        send('action grind_nearby {"radius":' .. radius .. '}')
+        return true
     end
     if command == 'goal' or command == 'autonomy' or command == 'cast' then
         send(command .. ' ' .. rest); return true

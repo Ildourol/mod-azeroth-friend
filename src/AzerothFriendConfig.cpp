@@ -1,4 +1,5 @@
 #include "AzerothFriendConfig.h"
+#include "AzerothFriendLiveState.h"
 #include "Config.h"
 #include "Log.h"
 #include "StringConvert.h"
@@ -93,10 +94,10 @@ void AzerothFriendConfig::Load()
     autonomyTickSeconds = sConfigMgr->GetOption<uint32>("AzerothFriend.Autonomy.TickSeconds", 5);
     if (autonomyTickSeconds < 3)
         autonomyTickSeconds = 3;
-    thinkingCadence = sConfigMgr->GetOption<std::string>("AzerothFriend.Autonomy.ThinkingCadence", "normal");
+    thinkingCadence = sConfigMgr->GetOption<std::string>("AzerothFriend.Autonomy.ThinkingCadence", "low");
     std::transform(thinkingCadence.begin(), thinkingCadence.end(), thinkingCadence.begin(), ::tolower);
-    if (thinkingCadence != "low" && thinkingCadence != "high")
-        thinkingCadence = "normal";
+    if (thinkingCadence != "normal" && thinkingCadence != "high")
+        thinkingCadence = "low";
     autonomyModes = sConfigMgr->GetOption<std::string>("AzerothFriend.Autonomy.Modes", "companion,guard,autonomous");
     autonomyLootRadius = sConfigMgr->GetOption<uint32>("AzerothFriend.Autonomy.LootRadius", 20);
     autonomyHealthPct = sConfigMgr->GetOption<uint32>("AzerothFriend.Autonomy.HealthPct", 40);
@@ -180,8 +181,21 @@ void AzerothFriendConfig::Load()
     hearNPCs = sConfigMgr->GetOption<bool>("AzerothFriend.Chatter.HearNPCs", true);
     maxRecentDialogue = sConfigMgr->GetOption<uint32>("AzerothFriend.Chatter.MaxRecentDialogue", 6);
 
-    LOG_INFO("server.loading", "[AzerothFriend] Configuration loaded (Enabled: {}, StorageMode: {}, Controlled bots: {} (max: {}), Primary: '{}')",
-             enable ? "Yes" : "No", storageMode == 1 ? "RAM" : "SQL", controlledBots.size(), maxControlledBots, GetPrimaryBotName());
+    // Ambient Nearby Mob Grinding & Roaming
+    grindSearchRadius = sConfigMgr->GetOption<float>("AzerothFriend.Grind.SearchRadiusYards", 60.0f);
+    if (grindSearchRadius < 10.0f)
+        grindSearchRadius = 10.0f;
+    else if (grindSearchRadius > 100.0f)
+        grindSearchRadius = 100.0f;
+
+    grindMaxLeashRadius = sConfigMgr->GetOption<float>("AzerothFriend.Grind.MaxLeashRadiusYards", 90.0f);
+    if (grindMaxLeashRadius < 20.0f)
+        grindMaxLeashRadius = 20.0f;
+    else if (grindMaxLeashRadius > 150.0f)
+        grindMaxLeashRadius = 150.0f;
+
+    LOG_INFO("server.loading", "[AzerothFriend] Configuration loaded (Enabled: {}, StorageMode: {}, Controlled bots: {} (max: {}), Primary: '{}', GrindRadius: {}y, Leash: {}y)",
+             enable ? "Yes" : "No", storageMode == 1 ? "RAM" : "SQL", controlledBots.size(), maxControlledBots, GetPrimaryBotName(), grindSearchRadius, grindMaxLeashRadius);
     LOG_INFO("server.loading", "[AzerothFriend] RAM-first rollout: stage={} live-state={} ({}:{}) shadow={} sql-compat={}",
              rolloutStage, liveStateEnable ? "on" : "off", liveStateHost, liveStatePort,
              liveStateShadowMode ? "yes" : "no", sqlCompatibilityMode ? "yes" : "no");
@@ -194,7 +208,7 @@ std::string AzerothFriendConfig::GetPrimaryBotName() const
 
 bool AzerothFriendConfig::IsBotControlled(std::string const& botName) const
 {
-    if (controlledBots.empty())
+    if (botName.empty())
         return false;
 
     for (const auto& name : controlledBots)
@@ -202,6 +216,16 @@ bool AzerothFriendConfig::IsBotControlled(std::string const& botName) const
         if (strcasecmp(name.c_str(), botName.c_str()) == 0)
             return true;
     }
+
+    if (sAFLiveState && sAFLiveState->IsRunning())
+    {
+        for (const auto& rec : sAFLiveState->GetControlledBots())
+        {
+            if (strcasecmp(rec.botName.c_str(), botName.c_str()) == 0)
+                return true;
+        }
+    }
+
     return false;
 }
 

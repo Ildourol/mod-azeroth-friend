@@ -483,7 +483,7 @@
             </Button>
 
             <!-- Thinking cadence switch: Low (20s) | Normal (10s) | High (4s) -->
-            <Button name="AzerothFriendBtnThinking" inherits="UIPanelButtonTemplate" text="Think: NORM">
+            <Button name="AzerothFriendBtnThinking" inherits="UIPanelButtonTemplate" text="Think: LOW">
                 <Size><AbsDimension x="80" y="22"/></Size>
                 <Anchors>
                     <Anchor point="RIGHT" relativeTo="AzerothFriendBtnClaim" relativePoint="LEFT" x="-6" y="0"/>

@@ -9,10 +9,11 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import mysql.connector
 
@@ -25,7 +26,8 @@ from friend_llm import LLMClient
 from friend_memory import WorkingMemory
 from friend_mindset import MindsetManager
 from friend_planner import CognitivePlanner
-from friend_goals import GoalScheduler, select_bots, validate_goal_update, generate_starter_goals
+from friend_goals import (GoalScheduler, select_bots, validate_goal_update, generate_starter_goals,
+                          generate_contextual_suggestions, get_known_hardcoded_goals)
 from friend_summaries import SummaryEngine, goal_identity, outcomes_from_action_rows
 from friend_spells import SpellDatabaseResolver
 from friend_command_parser import parse_cast_command, parse_slash_intent, match_bag_item_request
@@ -58,14 +60,18 @@ def event_command_text(event: Dict[str, Any]) -> str:
     return str(data.get("text") or data.get("command") or "").strip()
 
 
-def format_thought(text: str, source: str = "deterministic") -> str:
+def format_thought(text: str, source: str = "deterministic", mindset: Optional[str] = None) -> str:
     """Render a thought in the field format the addon parses.
 
     The Thoughts tab reads `Key: value` segments (Thought/Mindset/Source). Writing
     plain prose here made the panel silently ignore deterministic replies, so it
     kept showing a stale plan thought.
     """
-    return "Thought: %s | Source: %s" % (str(text).strip(), source)
+    parts = ["Thought: %s" % str(text).strip()]
+    if mindset:
+        parts.append("Mindset: %s" % mindset.strip())
+    parts.append("Source: %s" % source.strip())
+    return " | ".join(parts)
 
 
 def event_memory(event: Dict[str, Any], state: Dict[str, Any]) -> Optional[tuple]:
@@ -98,6 +104,200 @@ def event_memory(event: Dict[str, Any], state: Dict[str, Any]) -> Optional[tuple
     if etype == "trade_requested":
         return ("social", "Traded with %s." % (name or "the owner"), 4)
     return None
+
+
+def parse_suggestion_command(cmd_text: str) -> Optional[str]:
+    """Parse an owner request to suggest goals or tactical actions.
+    Returns 'both', 'long', 'short', or 'actions', or None if not a suggestion command.
+    """
+    if not cmd_text:
+        return None
+    raw = cmd_text.strip().lower()
+
+    # Strip prefixes: !af, .af, af, /, !
+    cleaned = re.sub(r"^[!./]*(?:af\s+)?", "", raw).strip()
+
+    # Check cast commands, e.g. "cast af_suggest_both", "cast af_suggest_actions", etc.
+    cast_match = re.match(r"^cast\s+af_suggest(?:_([a-z_]+))?", cleaned)
+    if cast_match:
+        scope = cast_match.group(1) or "both"
+        if "action" in scope or "tactic" in scope or "act" in scope:
+            return "actions"
+        if "long" in scope or "purpose" in scope:
+            return "long"
+        if "short" in scope or "objective" in scope:
+            return "short"
+        return "both"
+
+    # Check "suggest [scope]" or "generate [scope]"
+    sug_match = re.match(r"^(?:suggest|generate|goal\s+generate|goal\s+suggest|recommend)\s*(.*)", cleaned)
+    if sug_match:
+        target = sug_match.group(1).strip()
+        if "action" in target or "tactic" in target or "act" in target:
+            return "actions"
+        if "long" in target or "purpose" in target:
+            return "long"
+        if "short" in target or "objective" in target:
+            return "short"
+        return "both"
+
+    # Check specific keywords
+    if "suggest" in cleaned or "recommend" in cleaned:
+        if "action" in cleaned or "tactic" in cleaned:
+            return "actions"
+        elif "long" in cleaned or "purpose" in cleaned:
+            return "long"
+        elif "short" in cleaned or "objective" in cleaned:
+            return "short"
+        elif "goal" in cleaned or "all" in cleaned or "both" in cleaned:
+            return "both"
+
+    return None
+
+
+def handle_suggestion_request(
+    bot_guid: int,
+    bot_info: Dict[str, Any],
+    state: Dict[str, Any],
+    scope: str,
+    llm_client: Optional[Any],
+    db_mgr: DatabaseManager,
+    event: Dict[str, Any],
+    revision: int,
+    provenance: Dict[str, Any]
+) -> None:
+    bot_name = bot_info.get("bot_name", "Companion")
+    scope = "actions" if scope in ("action", "actions") else scope
+
+    prev_goals = {
+        "short": str(bot_info.get("current_goal") or ""),
+        "long": str(bot_info.get("long_term_goal") or ""),
+        "actions": str(bot_info.get("last_suggested_actions") or "")
+    }
+
+    surroundings = state.get("environment_json") or state.get("surroundings") or {}
+    if isinstance(surroundings, str):
+        try:
+            surroundings = json.loads(surroundings)
+        except Exception:
+            surroundings = {}
+
+    suggestions = generate_contextual_suggestions(
+        bot_info=bot_info,
+        surroundings=surroundings,
+        llm_client=llm_client,
+        scope=scope,
+        previous_goals=prev_goals,
+        state=state
+    )
+
+    new_short = suggestions.get("short_term_goal") or prev_goals["short"]
+    new_long = suggestions.get("long_term_goal") or prev_goals["long"]
+    new_actions = suggestions.get("suggested_actions") or ""
+    action_summary = suggestions.get("action_summary") or ""
+
+    # Persist in MySQL
+    new_rev = revision + 1
+    sql_sets = ["control_revision = control_revision + 1"]
+    sql_params = []
+
+    if scope in ("both", "short"):
+        sql_sets.append("current_goal = %s")
+        sql_params.append(new_short)
+        bot_info["current_goal"] = new_short
+    if scope in ("both", "long"):
+        sql_sets.append("long_term_goal = %s")
+        sql_params.append(new_long)
+        bot_info["long_term_goal"] = new_long
+
+    sql_params.append(bot_guid)
+    try:
+        with db_mgr.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE azeroth_friend_bots SET {', '.join(sql_sets)} WHERE bot_guid = %s",
+                    tuple(sql_params)
+                )
+                conn.commit()
+        bot_info["control_revision"] = new_rev
+        bot_info["last_suggested_actions"] = new_actions
+    except Exception as db_err:
+        logger.error("[SUGGEST] Failed to persist AI suggested goals: %s", db_err)
+
+    if scope == "actions":
+        thought_text = f"Tactical routine: {action_summary}. Recommended: {new_actions}"
+        source = "ai_tactics"
+        mindset = "COMBAT"
+    elif scope == "short":
+        thought_text = f"Refining tactical objective: {new_short}"
+        source = "ai_goals"
+        mindset = "IDLE"
+    elif scope == "long":
+        thought_text = f"Contemplating core purpose: {new_long}"
+        source = "ai_goals"
+        mindset = "IDLE"
+    else:
+        thought_text = f"Purpose: {new_long} | Objective: {new_short}"
+        if new_actions:
+            thought_text += f" | Action: {new_actions}"
+        source = "ai_suggest"
+        mindset = "IDLE"
+
+    thought = format_thought(thought_text, source, mindset=mindset)
+    db_mgr.update_bot_thought(bot_guid, thought)
+
+    speaker = event.get("source_name")
+    payload = event.get("payload_json") or "{}"
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            payload = {}
+    channel = payload.get("channel", "whisper") if isinstance(payload, dict) else "whisper"
+
+    steps = []
+    if scope == "long":
+        chat_msg = f"AI Suggested Purpose: {new_long}"
+    elif scope == "short":
+        chat_msg = f"AI Suggested Objective: {new_short}"
+    elif scope == "actions":
+        chat_msg = f"AI Suggested Actions: {new_actions} ({action_summary})"
+    else:
+        chat_msg = f"AI Purpose: {new_long} | Objective: {new_short}"
+        if new_actions:
+            chat_msg += f" | Action: {new_actions}"
+
+    if speaker:
+        steps.append({"action": "say", "params": {"target": speaker, "text": chat_msg, "channel": channel or "whisper"}})
+    else:
+        steps.append({"action": "say", "params": {"text": chat_msg}})
+
+    addon_telemetry = json.dumps({
+        "bot": bot_name,
+        "goal": new_short,
+        "long_goal": new_long,
+        "suggested_actions": new_actions,
+        "action_summary": action_summary,
+        "status": bot_info.get("goal_status", "paused"),
+        "enabled": bool(bot_info.get("autonomy_enabled", False))
+    })
+    telem_params = {"text": f"[FRIEND_GOAL] {addon_telemetry}"}
+    if speaker:
+        telem_params["target"] = speaker
+    steps.append({"action": "say", "params": telem_params})
+
+    thought_params = {"text": f"[FRIEND_THOUGHT] Bot: {bot_name}|{thought}"}
+    if speaker:
+        thought_params["target"] = speaker
+    steps.append({"action": "say", "params": thought_params})
+
+    plan_id = "sug_" + str(int(time.time()))[-6:]
+    db_mgr.insert_action_plan(
+        bot_guid, plan_id, steps, thought=thought, revision=new_rev, **provenance
+    )
+    logger.info("[SUGGEST] Dispatched AI suggestions for bot %d (%s) [scope=%s]: Short='%s', Long='%s', Actions='%s'",
+                bot_guid, bot_name, scope, new_short, new_long, new_actions)
+
 
 
 def attach_spell_dbc_index(db_mgr: DatabaseManager, config: Dict[str, str], config_path: str) -> None:
@@ -332,6 +532,51 @@ def main() -> int:
           allowed_bot_names if allowed_bot_names else "NONE", max_controlled
     )
 
+    class BridgeContext:
+        def __init__(self):
+            self.db_mgr = db_mgr
+            self.livestate_client = live_state_transport
+            self.state_store = live_state_cache
+            self.memory = memory
+            self.planner = planner
+            self.is_running = True
+
+        def stop(self):
+            self.is_running = False
+
+    bridge_ctx = BridgeContext()
+
+    # JSON-RPC 2.0 Gateway Server (MAF-060)
+    rpc_server = None
+    if config_bool(config, "AzerothFriend.Rpc.Enable", True):
+        try:
+            from friend_rpc import JSONRPCServer
+            rpc_port = int(config.get("AzerothFriend.Rpc.Port", "8378"))
+            rpc_host = config.get("AzerothFriend.Rpc.Host", "127.0.0.1")
+            rpc_server = JSONRPCServer(host=rpc_host, port=rpc_port, bridge=bridge_ctx)
+            rpc_server.start()
+        except Exception as rpc_err:
+            logger.warning("Could not start JSON-RPC server: %s", rpc_err)
+
+    # Modular Plugin Engine (MAF-060)
+    plugin_manager = None
+    if config_bool(config, "AzerothFriend.Plugins.Enable", True):
+        try:
+            from friend_plugins import PluginManager
+            plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
+            plugin_manager = PluginManager(plugins_dir=plugins_dir)
+            loaded_count = plugin_manager.discover_and_load(context={
+                "db_mgr": db_mgr,
+                "live_state": live_state_cache,
+                "memory": memory,
+                "planner": planner,
+            })
+            if rpc_server:
+                plugin_manager.register_rpc_with_server(rpc_server)
+            logger.info("Modular Plugin Engine initialized (%d plugin(s) active)", loaded_count)
+        except Exception as plugin_err:
+            logger.warning("Could not initialize plugins: %s", plugin_err)
+
     last_sensory_poll = 0.0
     last_telemetry_sync = 0.0
     last_memory: Dict[tuple, float] = {}
@@ -339,6 +584,7 @@ def main() -> int:
     last_bot_refresh = 0.0
     bot_refresh_seconds = float(config.get("AzerothFriend.Cache.BotRefreshSeconds", "15"))
     registered_bots: Dict[int, Dict[str, Any]] = {}
+    staged_trade_offers: Dict[int, List[Dict[str, Any]]] = {}
     last_summary_flush = 0.0
     last_retention_prune = 0.0
     last_diag_send = 0.0
@@ -348,7 +594,7 @@ def main() -> int:
     last_budget_diagnostic = ""
 
     try:
-        while True:
+        while bridge_ctx.is_running:
             try:
                 now = time.time()
                 if allowed_bot_names and (now - last_auto_reg_poll >= 30.0):
@@ -414,6 +660,60 @@ def main() -> int:
                             except Exception as goal_err:
                                 logger.debug("[GOAL] Failed to save starter goals: %s", goal_err)
 
+                # Overwrite legacy hardcoded static goals if present with fresh AI-generated goals
+                known_hardcoded = get_known_hardcoded_goals()
+                for bot_guid, b_info in registered_bots.items():
+                    cur_short = str(b_info.get("current_goal") or "").strip()
+                    cur_long = str(b_info.get("long_term_goal") or "").strip()
+                    if (cur_short in known_hardcoded or cur_long in known_hardcoded) and db_mgr.control_is_current(
+                            bot_guid, int(b_info.get("control_revision") or 0)):
+                        logger.info("[GOAL] Detected legacy hardcoded goal on bot %d ('%s' / '%s'). Regenerating AI goal...",
+                                    bot_guid, cur_short, cur_long)
+                        prev_g = {"short": cur_short, "long": cur_long}
+                        b_state = live_state_cache.snapshot(bot_guid) or {}
+                        b_surroundings = b_state.get("environment_json") or b_state.get("surroundings") or {}
+                        if isinstance(b_surroundings, str):
+                            try:
+                                b_surroundings = json.loads(b_surroundings)
+                            except Exception:
+                                b_surroundings = {}
+                        ai_res = generate_contextual_suggestions(
+                            bot_info=b_info,
+                            surroundings=b_surroundings,
+                            llm_client=llm_client,
+                            scope="both",
+                            previous_goals=prev_g,
+                            state=b_state
+                        )
+                        fresh_short = ai_res.get("short_term_goal") or cur_short
+                        fresh_long = ai_res.get("long_term_goal") or cur_long
+                        fresh_actions = ai_res.get("suggested_actions") or ""
+                        if fresh_short in known_hardcoded:
+                            fresh_short = f"{fresh_short} (active)"
+                        if fresh_long in known_hardcoded:
+                            fresh_long = f"{fresh_long} (active)"
+
+                        new_rev = int(b_info.get("control_revision") or 0) + 1
+                        try:
+                            with db_mgr.get_connection() as conn:
+                                with conn.cursor() as cur:
+                                    cur.execute(
+                                        "UPDATE azeroth_friend_bots SET current_goal = %s, long_term_goal = %s, "
+                                        "control_revision = control_revision + 1 WHERE bot_guid = %s",
+                                        (fresh_short, fresh_long, bot_guid)
+                                    )
+                                    conn.commit()
+                            b_info["current_goal"] = fresh_short
+                            b_info["long_term_goal"] = fresh_long
+                            b_info["control_revision"] = new_rev
+                            b_info["last_suggested_actions"] = fresh_actions
+                            thought = format_thought(f"Upgraded goal with AI: Short='{fresh_short}', Long='{fresh_long}'", "ai_suggest")
+                            db_mgr.update_bot_thought(bot_guid, thought)
+                            logger.info("[GOAL] Successfully upgraded bot %d to AI goals: Short='%s', Long='%s'",
+                                        bot_guid, fresh_short, fresh_long)
+                        except Exception as update_err:
+                            logger.error("[GOAL] Failed to update hardcoded goal: %s", update_err)
+
                 # 1. Zero-Token Sensory Consumption from mod-llm-chatter
                 if now - last_sensory_poll >= 2.0:
                     last_sensory_poll = now
@@ -461,6 +761,12 @@ def main() -> int:
                         continue
 
                     bot_info = registered_bots[bot_guid]
+                    if plugin_manager:
+                        try:
+                            plugin_manager.dispatch_event(str(event.get("event_type") or ""), event, bot_info)
+                        except Exception as p_err:
+                            logger.debug("Plugin dispatch error: %s", p_err)
+
                     # Live surroundings come from RAM only. SQL checkpoints are
                     # recovery data and are consulted exclusively in the explicit
                     # SQL compatibility mode (never as "live" state).
@@ -560,19 +866,31 @@ def main() -> int:
                             except Exception as memory_error:
                                 logger.debug("Memory write failed: %s", memory_error)
 
-                    # Owner interactions: Keep trade window open instead of blind auto-accept.
+                    # Owner interactions: Check staged trade offers first (MAF-034 two-phase trade)
                     if event.get('event_type') == 'trade_requested':
                         initiator = event.get('source_name') or "the owner"
-                        thought = format_thought(f"Trade window opened with {initiator}. Waiting for trade items or instructions.", "trade")
-                        plan_id = str(uuid.uuid4())[:8]
-                        logger.info("[TRADE] Bot %d trade window opened with %s", bot_guid, initiator)
-                        db_mgr.update_bot_thought(bot_guid, thought)
-                        steps = []
-                        if acknowledge_commands:
-                            steps.append({"action": "say", "params": {"text": "Trade window open. Let me know what you need or ask me to link items."}})
-                        if steps:
-                            db_mgr.insert_action_plan(bot_guid, plan_id, steps, thought=thought,
+                        staged_steps = staged_trade_offers.pop(bot_guid, None)
+                        if staged_steps:
+                            thought = format_thought(
+                                f"Trade window opened with {initiator}. Placing staged items into trade.",
+                                "trade"
+                            )
+                            plan_id = str(uuid.uuid4())[:8]
+                            logger.info("[TRADE] Bot %d trade window opened; executing %d staged trade steps", bot_guid, len(staged_steps))
+                            db_mgr.update_bot_thought(bot_guid, thought)
+                            db_mgr.insert_action_plan(bot_guid, plan_id, staged_steps, thought=thought,
                                                       revision=revision, **provenance)
+                        else:
+                            thought = format_thought(f"Trade window opened with {initiator}. Waiting for trade items or instructions.", "trade")
+                            plan_id = str(uuid.uuid4())[:8]
+                            logger.info("[TRADE] Bot %d trade window opened with %s", bot_guid, initiator)
+                            db_mgr.update_bot_thought(bot_guid, thought)
+                            steps = []
+                            if acknowledge_commands:
+                                steps.append({"action": "say", "params": {"text": "Trade window open. Let me know what you need or ask me to link items."}})
+                            if steps:
+                                db_mgr.insert_action_plan(bot_guid, plan_id, steps, thought=thought,
+                                                          revision=revision, **provenance)
                         db_mgr.mark_event_status(event_id, 'completed')
                         continue
 
@@ -605,9 +923,6 @@ def main() -> int:
 
                     # Dialogue trigger: react to what was said when autonomous
                     if event.get('event_type') == 'dialogue_heard':
-                        if not bot_info.get('autonomy_enabled'):
-                            db_mgr.mark_event_status(event_id, 'skipped')
-                            continue
                         speaker = event.get('source_name') or "someone"
                         payload_raw = event.get('payload_json') or "{}"
                         heard_text = ""
@@ -616,6 +931,29 @@ def main() -> int:
                             heard_text = p_data.get('text') or ""
                         except Exception:
                             pass
+
+                        # Suggestions can be requested via whisper/dialogue even if autonomy is disabled
+                        sug_scope = parse_suggestion_command(heard_text)
+                        if sug_scope:
+                            logger.info("[SUGGEST] Received suggestion request from dialogue for bot %d: scope=%s (heard='%s')",
+                                        bot_guid, sug_scope, heard_text)
+                            handle_suggestion_request(
+                                bot_guid=bot_guid,
+                                bot_info=bot_info,
+                                state=state,
+                                scope=sug_scope,
+                                llm_client=llm_client,
+                                db_mgr=db_mgr,
+                                event=event,
+                                revision=revision,
+                                provenance=provenance
+                            )
+                            db_mgr.mark_event_status(event_id, 'completed')
+                            continue
+
+                        if not bot_info.get('autonomy_enabled'):
+                            db_mgr.mark_event_status(event_id, 'skipped')
+                            continue
                         if heard_text:
                             thought = format_thought(f"Overheard {speaker}: \"{heard_text}\". Considering context.", "social")
                             db_mgr.update_bot_thought(bot_guid, thought)
@@ -651,6 +989,26 @@ def main() -> int:
                     # and dispatched without a model call (0 tokens).
                     if event.get('event_type') == 'player_command':
                         cmd_text = event_command_text(event)
+
+                        # Check if player is requesting suggestions for goals or tactical actions
+                        sug_scope = parse_suggestion_command(cmd_text)
+                        if sug_scope:
+                            logger.info("[SUGGEST] Received suggestion request for bot %d: scope=%s (cmd='%s')",
+                                        bot_guid, sug_scope, cmd_text)
+                            handle_suggestion_request(
+                                bot_guid=bot_guid,
+                                bot_info=bot_info,
+                                state=state,
+                                scope=sug_scope,
+                                llm_client=llm_client,
+                                db_mgr=db_mgr,
+                                event=event,
+                                revision=revision,
+                                provenance=provenance
+                            )
+                            db_mgr.mark_event_status(event_id, 'completed')
+                            continue
+
                         trade_info = state.get("vitals", {}).get("trade", {}) if isinstance(state, dict) else {}
                         is_trade_active = bool(trade_info.get("active", False))
 
@@ -671,12 +1029,16 @@ def main() -> int:
                             plan_id = str(uuid.uuid4())[:8]
                             logger.info("[BAG_ITEM] Bot %d matched item '%s' (x%d) from carried inventory", bot_guid, matched_name, req_count)
                             db_mgr.update_bot_thought(bot_guid, thought)
-                            steps = []
-                            if not is_trade_active:
-                                steps.append({"action": "playerbot_command", "params": {"command": "trade"}})
-                            steps.append({"action": "trade_set_item", "params": {"item": matched_name, "count": req_count}})
-                            if acknowledge_commands:
-                                steps.append({"action": "say", "params": {"text": f"Found {matched_name} in my bags."}})
+                            trade_step = {"action": "trade_set_item", "params": {"item": matched_name, "count": req_count}}
+                            if is_trade_active:
+                                steps = [trade_step]
+                                if acknowledge_commands:
+                                    steps.append({"action": "say", "params": {"text": f"Found {matched_name} in my bags."}})
+                            else:
+                                staged_trade_offers[bot_guid] = [trade_step]
+                                steps = [{"action": "playerbot_command", "params": {"command": "trade"}}]
+                                if acknowledge_commands:
+                                    steps.append({"action": "say", "params": {"text": f"Found {matched_name} in my bags. Opening trade."}})
                             db_mgr.insert_action_plan(bot_guid, plan_id, steps, thought=thought,
                                                       revision=revision, **provenance)
                             db_mgr.mark_event_status(event_id, 'completed')
@@ -693,6 +1055,8 @@ def main() -> int:
                                 mindset_manager.set_mindset(bot_guid, "RESTING", custom_duration=300.0, thought="Holding position as ordered by master.")
                             elif action_name in ("follow",):
                                 mindset_manager.set_mindset(bot_guid, "FOLLOWING", custom_duration=15.0, thought="Following master.")
+                            elif action_name == "set_action_mode" and slash_step.get("params", {}).get("mode") == "combat":
+                                mindset_manager.set_mindset(bot_guid, "FOLLOWING", custom_duration=15.0, thought="Combat posture active: following master into battle.")
 
                             thought = format_thought(
                                 f"Owner command matched slash action '{action_name}'. No model call needed.",
@@ -703,10 +1067,19 @@ def main() -> int:
                             db_mgr.update_bot_thought(bot_guid, thought)
                             steps = []
                             if not is_trade_active and action_name in ("trade_set_gold", "trade_set_item"):
+                                staged_trade_offers[bot_guid] = [slash_step]
                                 steps.append({"action": "playerbot_command", "params": {"command": "trade"}})
-                            steps.append(slash_step)
-                            if acknowledge_commands and action_name not in ("trade_link_items", "say"):
-                                steps.append({"action": "say", "params": {"text": "On it."}})
+                                if acknowledge_commands:
+                                    steps.append({"action": "say", "params": {"text": "Opening trade."}})
+                            elif action_name == "set_action_mode" and slash_step.get("params", {}).get("mode") == "combat":
+                                steps.append(slash_step)
+                                steps.append({"action": "follow"})
+                                if acknowledge_commands:
+                                    steps.append({"action": "say", "params": {"text": "Combat mode active: following you."}})
+                            else:
+                                steps.append(slash_step)
+                                if acknowledge_commands and action_name not in ("trade_link_items", "say"):
+                                    steps.append({"action": "say", "params": {"text": "On it."}})
                             db_mgr.insert_action_plan(bot_guid, plan_id, steps, thought=thought,
                                                       revision=revision, **provenance)
                             db_mgr.mark_event_status(event_id, 'completed')
@@ -958,20 +1331,43 @@ def main() -> int:
                 logger.error("Unexpected error in Bridge event loop: %s", e, exc_info=True)
                 time.sleep(2.0)
 
-    except KeyboardInterrupt:
-        # Orderly shutdown: flush dirty summaries and the chatter checkpoint, then
-        # close the live-state transport so no half-written frame is left behind.
-        try:
-            summary_engine.flush_all(reason="shutdown")
-        except Exception as flush_err:
-            logger.debug("Shutdown summary flush failed: %s", flush_err)
-        try:
-            chatter_consumer.save_checkpoint()
-        except Exception as checkpoint_err:
-            logger.debug("Shutdown checkpoint save failed: %s", checkpoint_err)
-        live_state_transport.stop()
-        logger.info("AzerothFriend Python Bridge shutting down cleanly.")
+        # Loop exited normally (e.g. via session.shutdown RPC)
+        _perform_shutdown(summary_engine, chatter_consumer, plugin_manager, rpc_server, live_state_transport)
         return 0
+
+    except KeyboardInterrupt:
+        _perform_shutdown(summary_engine, chatter_consumer, plugin_manager, rpc_server, live_state_transport)
+        return 0
+
+
+def _perform_shutdown(
+    summary_engine: SummaryEngine,
+    chatter_consumer: ChatterSensoryConsumer,
+    plugin_manager: Optional[Any],
+    rpc_server: Optional[Any],
+    live_state_transport: LiveStateTransport,
+) -> None:
+    """Orderly 2-phase shutdown: flush dirty summaries, save chatter checkpoints, drain plugins, and close transports."""
+    try:
+        summary_engine.flush_all(reason="shutdown")
+    except Exception as flush_err:
+        logger.debug("Shutdown summary flush failed: %s", flush_err)
+    try:
+        chatter_consumer.save_checkpoint()
+    except Exception as checkpoint_err:
+        logger.debug("Shutdown checkpoint save failed: %s", checkpoint_err)
+    if plugin_manager:
+        try:
+            plugin_manager.shutdown_all()
+        except Exception as p_err:
+            logger.debug("Plugin shutdown error: %s", p_err)
+    if rpc_server:
+        try:
+            rpc_server.stop()
+        except Exception as rpc_err:
+            logger.debug("RPC server shutdown error: %s", rpc_err)
+    live_state_transport.stop()
+    logger.info("AzerothFriend Python Bridge shutting down cleanly.")
 
 
 if __name__ == "__main__":

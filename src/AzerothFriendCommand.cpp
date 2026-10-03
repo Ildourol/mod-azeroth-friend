@@ -14,6 +14,8 @@
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "DBCStores.h"
+#include "World.h"
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -920,8 +922,38 @@ namespace AzerothFriend
             Player* issuer = handler->GetPlayer();
             Player* bot = name.empty() ? nullptr : ObjectAccessor::FindPlayerByName(name.c_str());
             if (name.empty() && issuer && issuer->GetSelectedPlayer() &&
-                sAzerothFriendConfig->IsBotControlled(issuer->GetSelectedPlayer()->GetName()))
+                (sAzerothFriendConfig->IsBotControlled(issuer->GetSelectedPlayer()->GetName()) ||
+                 AzerothFriendPlayerbotActions::IsPlayerbot(issuer->GetSelectedPlayer())))
                 bot = issuer->GetSelectedPlayer();
+            if (name.empty() && !bot && issuer && issuer->GetGroup())
+            {
+                for (GroupReference* itr = issuer->GetGroup()->GetFirstMember(); itr != nullptr; itr = itr->next())
+                {
+                    Player* member = itr->GetSource();
+                    if (member && member != issuer &&
+                        (sAzerothFriendConfig->IsBotControlled(member->GetName()) ||
+                         AzerothFriendPlayerbotActions::IsPlayerbot(member)))
+                    {
+                        bot = member;
+                        break;
+                    }
+                }
+            }
+            if (name.empty() && !bot && sAFLiveState)
+            {
+                auto controlled = sAFLiveState->GetControlledBots();
+                for (auto const& rec : controlled)
+                {
+                    if (Player* b = ObjectAccessor::FindPlayerByName(rec.botName.c_str()))
+                    {
+                        if (AzerothFriendShared::CanControl(issuer, b))
+                        {
+                            bot = b;
+                            break;
+                        }
+                    }
+                }
+            }
             if (name.empty() && !bot)
                 bot = ObjectAccessor::FindPlayerByName(sAzerothFriendConfig->GetPrimaryBotName().c_str());
             if (!AzerothFriendShared::CanControl(issuer, bot))
@@ -933,6 +965,150 @@ namespace AzerothFriend
                 return nullptr;
             }
             return bot;
+        }
+
+        void GenerateContextualGoals(Player* bot, std::string const& scope, std::string& outShort, std::string& outLong)
+        {
+            uint8 level = bot ? bot->GetLevel() : 1;
+            uint8 cls = bot ? bot->getClass() : 1;
+            uint8 team = bot ? bot->GetTeamId() : 0; // 0 = Alliance, 1 = Horde
+
+            uint32 zoneId = bot ? bot->GetZoneId() : 0;
+            AreaTableEntry const* zoneEntry = sAreaTableStore.LookupEntry(zoneId);
+            char const* zp = zoneEntry ? zoneEntry->area_name[sWorld->GetDefaultDbcLocale()] : nullptr;
+            std::string zoneName = zp ? zp : "";
+
+            int bracket = 0;
+            if (level >= 80) bracket = 8;
+            else if (level >= 70) bracket = 7;
+            else if (level >= 60) bracket = 6;
+            else if (level >= 50) bracket = 5;
+            else if (level >= 40) bracket = 4;
+            else if (level >= 30) bracket = 3;
+            else if (level >= 20) bracket = 2;
+            else if (level >= 10) bracket = 1;
+            else bracket = 0;
+
+            if (scope != "short" && scope != "shortterm")
+            {
+                switch (bracket)
+                {
+                    case 0: // 1-9: Starter Fundamentals
+                    {
+                        switch (cls)
+                        {
+                            case 1: outLong = "Master frontline combat stances and forge unbreakable warrior prowess."; break;
+                            case 2: outLong = "Uphold the virtues of the Holy Light and defend our allies from darkness."; break;
+                            case 3: outLong = "Master marksmanship and the wilderness survival arts of our ancestors."; break;
+                            case 4: outLong = "Hone stealth techniques and lethal blade precision from the shadows."; break;
+                            case 5: outLong = "Deepen spiritual devotion to heal and shield our companions with Holy Light."; break;
+                            case 6: outLong = "Master the dark runic arts and unholy power granted in service."; break;
+                            case 7: outLong = "Harmonize with ancestral spirits and wield elemental fury."; break;
+                            case 8: outLong = "Attune to the arcane flows and master destructive spellcraft."; break;
+                            case 9: outLong = "Bound demonic entities to our will and harvest soul power."; break;
+                            case 11: outLong = "Attune with nature's balance and awaken ancient shapeshifting forms."; break;
+                            default: outLong = "Master the fundamental combat arts and survive our starter trials."; break;
+                        }
+                        break;
+                    }
+                    case 1: // 10-19: Specialization & First Dungeons
+                    {
+                        switch (cls)
+                        {
+                            case 1: outLong = "Unlock warrior talent specializations and stand as an impenetrable frontline bulwark."; break;
+                            case 2: outLong = "Attain holy or retributive specialization and purify contested dungeons."; break;
+                            case 3: outLong = "Bond with a loyal wilderness beast companion and master ranged marksmanship."; break;
+                            case 4: outLong = "Master lockpicking, dual-wielding daggers, and clandestine ambush tactics."; break;
+                            case 5: outLong = "Master holy triage or shadow word incantations in regional dungeon delves."; break;
+                            case 6: outLong = "Dominate runic combinations and conquer contested battlegrounds."; break;
+                            case 7: outLong = "Master totem attunements and channel elemental shocks in early dungeon expeditions."; break;
+                            case 8: outLong = "Master frost and fire specializations and research advanced arcane conduits."; break;
+                            case 9: outLong = "Complete demonic pact quests and siphon the souls of our faction's adversaries."; break;
+                            case 11: outLong = "Master feral and balance forms to harmonize raw beast fury with healing rejuvenation."; break;
+                            default: outLong = "Unlock talent specializations, complete class rites, and conquer introductory dungeons."; break;
+                        }
+                        break;
+                    }
+                    case 2: // 20-29: Weapon Mastery & Regional Quests
+                        outLong = "Master advanced weapon proficiencies and secure our reputation across contested regions.";
+                        break;
+                    case 3: // 30-39: Contested Renown & Riding
+                        outLong = "Earn coin for apprentice riding, conquer Scarlet Monastery, and master mid-tier abilities.";
+                        break;
+                    case 4: // 40-49: Ancient Ruins & Journeyman Riding
+                        outLong = "Attain journeyman riding speed, delve into ancient desert ruins, and master high-tier abilities.";
+                        break;
+                    case 5: // 50-59: Plaguelands & Champion Threshold
+                        outLong = "Cleanse the Scourge in the Plaguelands, conquer Blackrock Mountain, and achieve champion status at level 60.";
+                        break;
+                    case 6: // 60-69: Outland Expedition
+                        outLong = "March beyond the Dark Portal, conquer the Outland frontier, and master aerial riding.";
+                        break;
+                    case 7: // 70-79: Northrend Expedition
+                        outLong = "Champion the Northrend expedition, attain cold weather flying, and reach the level 80 threshold.";
+                        break;
+                    case 8: // 80: Endgame Raids & Heroics
+                    default:
+                        outLong = "Stand among the greatest champions of Azeroth in the halls of Icecrown Citadel and Ulduar.";
+                        break;
+                }
+            }
+
+            if (scope != "long" && scope != "longterm")
+            {
+                std::string locSuffix = zoneName.empty() ? "." : " in " + zoneName + ".";
+                switch (bracket)
+                {
+                    case 0: // 1-9
+                    {
+                        switch (cls)
+                        {
+                            case 1: outShort = "Slay local hostile beasts and collect starter armor upgrades" + locSuffix; break;
+                            case 2: outShort = "Judge encroaching enemies with holy seals and protect travelers" + locSuffix; break;
+                            case 3: outShort = "Hunt valley wildlife for meat and pelts, and practice ranged kiting" + locSuffix; break;
+                            case 4: outShort = "Scout hostile encampments from stealth and practice precision strikes" + locSuffix; break;
+                            case 5: outShort = "Mend wounded companions and smite hostile aggressors" + locSuffix; break;
+                            case 6: outShort = "Slay adversaries with icy touch and practice blood strike combinations" + locSuffix; break;
+                            case 7: outShort = "Call upon primal lightning and complete ancestral elemental trials" + locSuffix; break;
+                            case 8: outShort = "Conjure provisions, practice fireball rotations, and eliminate enemy scouts" + locSuffix; break;
+                            case 9: outShort = "Summon demon minion and harvest soul shards from hostile beasts" + locSuffix; break;
+                            case 11: outShort = "Gather herbal reagents, cast wrath on corrupters, and awaken nature forms" + locSuffix; break;
+                            default: outShort = "Complete starter valley trials and gather basic supplies" + locSuffix; break;
+                        }
+                        break;
+                    }
+                    case 1: // 10-19
+                    {
+                        if (team == 0) // Alliance
+                            outShort = "Travel to Westfall, explore the Deadmines, and complete class talent quests.";
+                        else // Horde
+                            outShort = "Travel to the Barrens, delve into Wailing Caverns, and complete quest trials.";
+                        break;
+                    }
+                    case 2: // 20-29
+                        outShort = "Upgrade weapon armaments, explore Shadowfang Keep or Blackfathom Deeps, and level trade skills.";
+                        break;
+                    case 3: // 30-39
+                        outShort = "Assault Scarlet Monastery wings, hunt dangerous game in Stranglethorn Vale, and train apprentice riding.";
+                        break;
+                    case 4: // 40-49
+                        outShort = "Explore the sands of Tanaris, conquer Zul'Farrak and Maraudon, and acquire journeyman riding.";
+                        break;
+                    case 5: // 50-59
+                        outShort = "Assault Blackrock Depths, cleanse Stratholme and Scholomance, and complete level 60 preparation.";
+                        break;
+                    case 6: // 60-69
+                        outShort = "Establish base camps in Hellfire Peninsula and Zangarmarsh, and clear Outland citadel dungeons.";
+                        break;
+                    case 7: // 70-79
+                        outShort = "Advance through Borean Tundra and Dragonblight, attune to Dalaran, and level toward 80.";
+                        break;
+                    case 8: // 80
+                    default:
+                        outShort = "Farm Emblem of Triumph in Heroic dungeons, optimize gems and enchants, and prepare for raid trials.";
+                        break;
+                }
+            }
         }
 
         void HandleGoal(ChatHandler* handler, std::string rest, bool autonomy)
@@ -957,6 +1133,20 @@ namespace AzerothFriend
             if (autonomy && (op == "on" || op == "off"))
                 assignments = op == "on" ? "bridge_enabled=1,autonomy_enabled=1,goal_status='active'" :
                     "autonomy_enabled=0,goal_status='paused'";
+            else if (!autonomy && (op == "generate" || op == "suggest"))
+            {
+                std::string scope = TakeWord(rest);
+                if (scope.empty())
+                    scope = "both";
+                std::transform(scope.begin(), scope.end(), scope.begin(), [](unsigned char c) { return std::tolower(c); });
+
+                Player* issuer = handler->GetPlayer();
+                AzerothFriendShared::QueueEvent(bot->GetGUID().GetCounter(), "player_command", 1,
+                    issuer ? issuer->GetGUID().GetCounter() : 0, issuer ? issuer->GetName() : "Console",
+                    "{\"text\":\"cast af_suggest_" + scope + "\",\"channel\":\"command\"}");
+                handler->SendSysMessage(("Requesting dynamic AI suggestions (" + scope + ") from companion bridge...").c_str());
+                return;
+            }
             else if (!autonomy && op == "set" && !rest.empty() && rest.size() <= 255)
                 assignments = "current_goal='" + AzerothFriendShared::EscapeSqlString(rest) +
                     "',goal_status='paused',autonomy_enabled=0,goal_progress='',goal_result=''";
@@ -976,10 +1166,10 @@ namespace AzerothFriend
             else
             {
                 if (Player* issuer = handler->GetPlayer())
-                    AzerothFriendShared::SendAddonError(issuer, "Usage: .af autonomy [bot] on|off|status; .af goal [bot] set <short term>|longterm <overall purpose>|show|pause|resume|complete|clear", bot->GetName());
+                    AzerothFriendShared::SendAddonError(issuer, "Usage: .af autonomy [bot] on|off|status; .af goal [bot] set <short term>|longterm <overall purpose>|generate [both|long|short]|show|pause|resume|complete|clear", bot->GetName());
                 else
                     handler->SendSysMessage("Usage: .af autonomy [bot] on|off|status; .af goal [bot] set <short term>|"
-                                            "longterm <overall purpose>|show|pause|resume|complete|clear");
+                                            "longterm <overall purpose>|generate [both|long|short]|show|pause|resume|complete|clear");
                 return;
             }
             if (op == "on" || op == "resume")
@@ -1022,6 +1212,57 @@ namespace AzerothFriend
             AzerothFriendEnvironment::instance()->BroadcastTelemetry(bot, handler->GetPlayer());
         }
 
+        void HandleSuggest(ChatHandler* handler, std::string rest)
+        {
+            std::string firstWord = TakeWord(rest);
+            std::string botName;
+            std::string scope;
+
+            auto isScopeKeyword = [](std::string const& s) -> bool {
+                std::string lower = s;
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+                return (lower == "actions" || lower == "action" || lower == "tactics" || lower == "act" ||
+                        lower == "both" || lower == "all" || lower == "goals" ||
+                        lower == "short" || lower == "shortterm" || lower == "objective" ||
+                        lower == "long" || lower == "longterm" || lower == "purpose");
+            };
+
+            if (isScopeKeyword(firstWord))
+            {
+                scope = firstWord;
+                botName = TakeWord(rest);
+            }
+            else
+            {
+                botName = firstWord;
+                scope = TakeWord(rest);
+            }
+
+            if (scope.empty())
+                scope = "both";
+
+            std::transform(scope.begin(), scope.end(), scope.begin(), [](unsigned char c) { return std::tolower(c); });
+
+            if (scope == "action" || scope == "tactics" || scope == "act")
+                scope = "actions";
+            else if (scope == "all" || scope == "goals")
+                scope = "both";
+            else if (scope == "shortterm" || scope == "objective")
+                scope = "short";
+            else if (scope == "longterm" || scope == "purpose")
+                scope = "long";
+
+            Player* bot = AuthorizedBot(handler, botName);
+            if (!bot)
+                return;
+
+            Player* issuer = handler->GetPlayer();
+            AzerothFriendShared::QueueEvent(bot->GetGUID().GetCounter(), "player_command", 1,
+                issuer ? issuer->GetGUID().GetCounter() : 0, issuer ? issuer->GetName() : "Console",
+                "{\"text\":\"cast af_suggest_" + scope + "\",\"channel\":\"command\"}");
+            handler->SendSysMessage(("Requesting dynamic AI suggestions (" + scope + ") for companion " + bot->GetName() + "...").c_str());
+        }
+
         void HandleMode(ChatHandler* handler, std::string rest)
         {
             std::string mode = TakeWord(rest);
@@ -1055,6 +1296,11 @@ namespace AzerothFriend
 
             uint32 botGuid = bot->GetGUID().GetCounter();
             AzerothFriendAiControl::ApplyMode(bot, mode);
+            if (mode == "combat")
+            {
+                if (Player* master = handler->GetPlayer())
+                    AzerothFriendBotController::Follow(bot, master);
+            }
 
             // Enqueue-only persistence
             std::string id = std::to_string(botGuid);
@@ -1072,115 +1318,170 @@ namespace AzerothFriend
 
         void HandleAction(ChatHandler* handler, std::string rest)
         {
-            std::string actionName = TakeWord(rest);
-            if (actionName.empty())
+            std::string trimmedRest = rest;
+            size_t firstNonWs = trimmedRest.find_first_not_of(" \t\r\n");
+            if (firstNonWs != std::string::npos)
+                trimmedRest = trimmedRest.substr(firstNonWs);
+            else
+                trimmedRest.clear();
+            size_t lastNonWs = trimmedRest.find_last_not_of(" \t\r\n");
+            if (lastNonWs != std::string::npos)
+                trimmedRest = trimmedRest.substr(0, lastNonWs + 1);
+
+            if (trimmedRest.empty())
             {
                 if (Player* issuer = handler->GetPlayer())
-                    AzerothFriendShared::SendAddonError(issuer, "Usage: .af action <combat|travel|idle|social|follow|stop|eat_drink>");
+                    AzerothFriendShared::SendAddonError(issuer, "Usage: .af action <combat|travel|idle|social|follow|stop|eat_drink|attack|loot|grind|...>");
                 else
-                    handler->SendSysMessage("Usage: .af action <combat|travel|idle|social|follow|stop|eat_drink>");
+                    handler->SendSysMessage("Usage: .af action <combat|travel|idle|social|follow|stop|eat_drink|attack|loot|grind|...>");
                 return;
             }
 
-            std::string loweredAction = actionName;
-            std::transform(loweredAction.begin(), loweredAction.end(), loweredAction.begin(), [](unsigned char c) { return std::tolower(c); });
-            if (loweredAction == "combat" || loweredAction == "travel" || loweredAction == "idle" || loweredAction == "social")
+            std::string loweredRest = trimmedRest;
+            std::transform(loweredRest.begin(), loweredRest.end(), loweredRest.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (loweredRest == "combat" || loweredRest == "travel" || loweredRest == "idle" || loweredRest == "social")
             {
-                HandleMode(handler, loweredAction + (rest.empty() ? "" : " " + rest));
+                HandleMode(handler, loweredRest);
                 return;
             }
+
+            std::string firstWord;
+            {
+                std::string tmp = trimmedRest;
+                firstWord = TakeWord(tmp);
+            }
+            std::string botName;
+            std::string actionPayload = trimmedRest;
+            if (sAzerothFriendConfig->IsBotControlled(firstWord))
+            {
+                botName = firstWord;
+                std::string tmp = trimmedRest;
+                TakeWord(tmp);
+                actionPayload = tmp;
+                size_t start = actionPayload.find_first_not_of(" \t\r\n");
+                if (start != std::string::npos)
+                    actionPayload = actionPayload.substr(start);
+                else
+                    actionPayload.clear();
+            }
+
+            if (actionPayload.empty())
+            {
+                if (Player* issuer = handler->GetPlayer())
+                    AzerothFriendShared::SendAddonError(issuer, "Usage: .af action [bot] <combat|travel|idle|social|follow|stop|eat_drink|attack|loot|grind|...>");
+                else
+                    handler->SendSysMessage("Usage: .af action [bot] <combat|travel|idle|social|follow|stop|eat_drink|attack|loot|grind|...>");
+                return;
+            }
+
+            Player* bot = AuthorizedBot(handler, botName);
+            if (!bot)
+                return;
 
             Player* self = handler->GetPlayer();
-            Player* bot = nullptr;
-
-            if (self && self->GetSelectedPlayer() && sAzerothFriendConfig->IsBotControlled(self->GetSelectedPlayer()->GetName()))
-            {
-                bot = self->GetSelectedPlayer();
-            }
-            else
-            {
-                for (const auto& bName : sAzerothFriendConfig->controlledBots)
-                {
-                    bot = ObjectAccessor::FindPlayerByName(bName.c_str());
-                    if (bot) break;
-                }
-            }
-
-            if (!bot)
-            {
-                if (self)
-                    AzerothFriendShared::SendAddonError(self, "No controlled companion bot found online.");
-                else
-                    handler->SendSysMessage("No controlled companion bot found online.");
-                return;
-            }
-
-            if (!AzerothFriendShared::CanControl(self, bot))
-            {
-                if (self)
-                    AzerothFriendShared::SendAddonError(self, "You do not own this companion.", bot->GetName());
-                else
-                    handler->SendSysMessage("You do not own this companion.");
-                return;
-            }
             AzerothFriendShared::InvalidateControl(bot);
             sAFDispatcher->InterruptBotPlan(bot->GetGUID().GetCounter(), "Owner action", false);
 
-            if (actionName == "follow")
-            {
-                if (AzerothFriendBotController::Follow(bot, self))
-                    handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to follow you.").c_str());
-                else
-                    handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the follow action.").c_str());
-            }
-            else if (actionName == "stop" || actionName == "hold" || actionName == "stay")
-            {
-                if (AzerothFriendBotController::Stop(bot))
-                    handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to hold position.").c_str());
-                else
-                    handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the hold action.").c_str());
-            }
-            else if (actionName == "eat_drink" || actionName == "rest")
-            {
-                if (AzerothFriendBotController::EatDrink(bot))
-                    handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to rest (eat/drink).").c_str());
-                else
-                    handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the rest action.").c_str());
-            }
-            else if (actionName == "attack")
-            {
-                if (AzerothFriendPlayerbotActions::DoCommand(bot, "attack"))
-                    handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to attack target.").c_str());
-                else
-                    handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the attack action.").c_str());
-            }
-            else if (actionName == "loot" || actionName == "loot_all")
-            {
-                if (AzerothFriendPlayerbotActions::DoCommand(bot, "loot all"))
-                    handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to loot.").c_str());
-                else
-                    handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the loot action.").c_str());
-            }
-            else if (actionName == "flee")
-            {
-                if (AzerothFriendPlayerbotActions::DoCommand(bot, "flee"))
-                    handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to flee.").c_str());
-                else
-                    handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the flee action.").c_str());
-            }
-            else
-            {
-                std::string fullCmd = actionName;
-                if (!rest.empty())
-                    fullCmd += " " + rest;
+            // Thoughts System Integration: Action Execution Thought
+            std::string fullActionChain = actionPayload;
+            std::string thoughtText = "Executing ordered tactical action: '" + fullActionChain + "'";
+            std::string thoughtPayload = "Thought: " + thoughtText + " | Mindset: COMBAT | Source: owner_action";
 
-                if (AzerothFriendPlayerbotActions::DoCommand(bot, fullCmd))
+            if (sAFLiveState && sAFLiveState->IsRunning())
+                sAFLiveState->SetThought(bot->GetGUID().GetCounter(), thoughtPayload);
+
+            CharacterDatabase.Execute(
+                ("UPDATE azeroth_friend_state SET last_thought = '" +
+                 AzerothFriendShared::EscapeSqlString(thoughtPayload) +
+                 "' WHERE bot_guid = " + std::to_string(bot->GetGUID().GetCounter())).c_str());
+
+            AzerothFriendShared::SendTelemetry(bot, "FRIEND_THOUGHT", "Bot: " + bot->GetName() + "|" + thoughtPayload, self);
+
+            // Parse comma-separated action sequence
+            std::vector<std::string> subActions;
+            std::stringstream ss(fullActionChain);
+            std::string item;
+            while (std::getline(ss, item, ','))
+            {
+                size_t first = item.find_first_not_of(" \t\r\n");
+                if (first == std::string::npos)
+                    continue;
+                size_t last = item.find_last_not_of(" \t\r\n");
+                subActions.push_back(item.substr(first, last - first + 1));
+            }
+            if (subActions.empty())
+                subActions.push_back(fullActionChain);
+
+            for (auto const& subAction : subActions)
+            {
+                std::string subRest = subAction;
+                std::string subName = TakeWord(subRest);
+                std::string loweredSubName = subName;
+                std::transform(loweredSubName.begin(), loweredSubName.end(), loweredSubName.begin(), [](unsigned char c) { return std::tolower(c); });
+
+                if (loweredSubName == "follow")
                 {
-                    handler->SendSysMessage(("Ordered companion " + bot->GetName() + ": " + fullCmd).c_str());
+                    if (AzerothFriendBotController::Follow(bot, self))
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to follow you.").c_str());
+                    else
+                        handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the follow action.").c_str());
+                }
+                else if (loweredSubName == "stop" || loweredSubName == "hold" || loweredSubName == "stay")
+                {
+                    if (AzerothFriendBotController::Stop(bot))
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to hold position.").c_str());
+                    else
+                        handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the hold action.").c_str());
+                }
+                else if (loweredSubName == "eat_drink" || loweredSubName == "rest")
+                {
+                    if (AzerothFriendBotController::EatDrink(bot))
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to rest (eat/drink).").c_str());
+                    else
+                        handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the rest action.").c_str());
+                }
+                else if (loweredSubName == "attack")
+                {
+                    std::string cmd = subRest.empty() ? "attack" : ("attack " + subRest);
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, cmd))
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to " + cmd + ".").c_str());
+                    else
+                        handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the " + cmd + " action.").c_str());
+                }
+                else if (loweredSubName == "loot" || loweredSubName == "loot_all")
+                {
+                    std::string cmd = subRest.empty() ? "loot all" : ("loot " + subRest);
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, cmd))
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to " + cmd + ".").c_str());
+                    else
+                        handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the loot action.").c_str());
+                }
+                else if (loweredSubName == "flee")
+                {
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, "flee"))
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to flee.").c_str());
+                    else
+                        handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the flee action.").c_str());
+                }
+                else if (loweredSubName == "grind" || loweredSubName == "grind_nearby" || loweredSubName == "roam_nearby" || loweredSubName == "roam" || loweredSubName == "wander")
+                {
+                    AzerothFriendAiControl::ApplyMode(bot, "combat");
+                    AzerothFriendPlayerbotActions::ChangeStrategies(bot, "+follow,+grind,+combat,+loot", false);
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, "grind"))
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to roam/grind nearby.").c_str());
+                    else
+                        handler->SendSysMessage(("Companion " + bot->GetName() + " rejected grind.").c_str());
                 }
                 else
                 {
-                    handler->SendSysMessage(("Rejected action '" + fullCmd + "' for companion " + bot->GetName()).c_str());
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, subAction))
+                    {
+                        handler->SendSysMessage(("Ordered companion " + bot->GetName() + ": " + subAction).c_str());
+                    }
+                    else
+                    {
+                        handler->SendSysMessage(("Rejected action '" + subAction + "' for companion " + bot->GetName()).c_str());
+                    }
                 }
             }
         }
@@ -1213,6 +1514,11 @@ namespace AzerothFriend
             if (subcommand == "goal" || subcommand == "autonomy")
             {
                 HandleGoal(&handler, rest, subcommand == "autonomy");
+                return false;
+            }
+            if (subcommand == "suggest" || subcommand == "generate")
+            {
+                HandleSuggest(&handler, rest);
                 return false;
             }
             if (subcommand == "cast")
@@ -1253,7 +1559,8 @@ namespace AzerothFriend
                 if (subcommand != "action" && subcommand != "mode" && subcommand != "inspect" && subcommand != "sync" &&
                     subcommand != "context" && subcommand != "claim" && subcommand != "release" &&
                     subcommand != "status" && subcommand != "reset" && subcommand != "run" &&
-                    subcommand != "catalog" && subcommand != "diag" && subcommand != "thinking")
+                    subcommand != "catalog" && subcommand != "diag" && subcommand != "thinking" &&
+                    subcommand != "suggest" && subcommand != "generate")
                 {
                     if (Player* issuer = handler.GetPlayer())
                         AzerothFriendShared::SendAddonError(issuer, "You are not authorized to execute administrative AzerothFriend commands.");
@@ -1347,7 +1654,7 @@ namespace AzerothFriend
             handler.SendSysMessage("=== AzerothFriend Commands ===");
             handler.SendSysMessage(".af status              - Monitor background bridge, RAM/SQL status, and tokens saved");
             handler.SendSysMessage(".af inspect [bot]       - Broadcast zero-token live context & mindset telemetry to Addon");
-            handler.SendSysMessage(".af goal [bot] set <text>|show|pause|resume|complete|clear - Manage the focused goal");
+            handler.SendSysMessage(".af goal [bot] set <text>|longterm <text>|generate [both|long|short]|show|pause|resume|complete|clear - Manage companion goals");
             handler.SendSysMessage(".af autonomy [bot] on|off|status - Opt-in self-directed operation (needs a goal)");
             handler.SendSysMessage(".af thinking [low|normal|high] - Configure thinking cadence tier");
             handler.SendSysMessage(".af cast <spell> [target] - Natural-language spell request resolved against learned spells");

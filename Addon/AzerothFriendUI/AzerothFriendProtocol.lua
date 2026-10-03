@@ -48,6 +48,11 @@ function AFDecodeObject(text)
             if text:sub(i,i) == '"' then result[key] = quoted()
             elseif text:sub(i,i+3) == 'true' then result[key] = true; i = i + 4
             elseif text:sub(i,i+4) == 'false' then result[key] = false; i = i + 5
+            elseif text:sub(i,i+3) == 'null' then result[key] = nil; i = i + 4
+            elseif text:sub(i,i):match('[%d%-]') then
+                local numStr = text:sub(i):match('^([%d%.%-]+)')
+                result[key] = tonumber(numStr) or 0
+                i = i + #numStr
             else error('Unexpected value') end
             skip(); local c = text:sub(i,i); i = i + 1
             if c == '}' then return end

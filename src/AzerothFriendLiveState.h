@@ -165,6 +165,7 @@ namespace AzerothFriend
         uint32 GetActivePlanSteps(uint32 botGuid) const;
         void RefreshThoughtAsync(uint32 botGuid);
         std::string GetThought(uint32 botGuid) const;
+        void SetThought(uint32 botGuid, std::string const& thought);
         void RefreshHistoryAsync(uint32 botGuid);
         std::string GetHistory(uint32 botGuid) const;
 

@@ -56,7 +56,7 @@ struct AzerothFriendConfig
     // Autonomous ambient action ticks
     bool autonomyEnable = true;
     uint32 autonomyTickSeconds = 5;
-    std::string thinkingCadence = "normal"; // "low" (20s), "normal" (10s), "high" (4s)
+    std::string thinkingCadence = "low"; // "low" (20s), "normal" (10s), "high" (4s)
     std::string autonomyModes = "companion,guard,autonomous";
     uint32 autonomyLootRadius = 20;
     uint32 autonomyHealthPct = 40;
@@ -124,6 +124,10 @@ struct AzerothFriendConfig
     bool hearOtherBots = true;
     bool hearNPCs = true;
     uint32 maxRecentDialogue = 6;
+
+    // Ambient Nearby Mob Grinding & Roaming
+    float grindSearchRadius = 60.0f;
+    float grindMaxLeashRadius = 90.0f;
 
     void Load();
     bool IsBotControlled(std::string const& botName) const;

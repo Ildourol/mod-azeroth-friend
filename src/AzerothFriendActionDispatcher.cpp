@@ -331,6 +331,16 @@ namespace
         std::snprintf(buffer, sizeof(buffer), "%.2f", value);
         return std::string(buffer);
     }
+
+    bool IsCombatOrSurvivalAction(std::string_view actionType)
+    {
+        return actionType == "attack" || actionType == "pull" || actionType == "cast" ||
+               actionType == "cast_on" || actionType == "assist" || actionType == "flee" ||
+               actionType == "runaway" || actionType == "aoe" || actionType == "healing_potion" ||
+               actionType == "healthstone" || actionType == "boost" || actionType == "cc" ||
+               actionType == "behind" || actionType == "tank_face" || actionType == "threat" ||
+               actionType == "pull_back" || actionType == "say" || actionType == "playerbot_command";
+    }
 }
 
 void AzerothFriendActionDispatcher::Initialize()
@@ -803,16 +813,19 @@ void AzerothFriendActionDispatcher::AttendActiveStep(Player* bot, BotActiveActio
             AzerothFriendAiControl::Release(bot, "plan complete");
     };
 
-    // Combat Supremacy Check: If combat starts during an active step, yield immediately
-    if (AzerothFriendAiControl::IsInCombatSupremacy(bot))
+    // Combat Supremacy Check: Only peaceful autonomous actions yield to combat supremacy
+    if (AzerothFriendAiControl::IsInCombatSupremacy(bot) && !IsCombatOrSurvivalAction(action.actionType) && action.authority != "owner_command")
     {
         Finish("yielded_to_combat", false, "combat supremacy engaged");
         CancelRemainingSteps(bot, action.planId, "combat supremacy engaged");
         return;
     }
 
-    // Elastic Tether Check: If owner moves >35y away or mounts up during active step, abort & follow
-    if (!action.handedOff && !AzerothFriendAiControl::CheckOwnerTether(bot, 35.0f))
+    // Elastic Tether Check: If owner moves beyond leash threshold or mounts up during active step, abort & follow
+    float tetherDist = (action.actionType == "grind_nearby" || action.actionType == "roam_nearby" || action.actionType == "grind" || action.actionType == "roam" || action.actionType == "wander")
+        ? sAzerothFriendConfig->grindMaxLeashRadius
+        : 35.0f;
+    if (!action.handedOff && !AzerothFriendAiControl::CheckOwnerTether(bot, tetherDist))
     {
         Finish("tether_broken", false, "tether distance exceeded");
         CancelRemainingSteps(bot, action.planId, "tether distance exceeded; sprinting back to formation");
@@ -971,6 +984,37 @@ void AzerothFriendActionDispatcher::ProcessBotActions(Player* bot, std::string c
 {
     uint32 botGuid = bot->GetGUID().GetCounter();
 
+#if AF_HAS_PLAYERBOTS
+    // Master Tether / Leash Guard (MAF-071):
+    // If bot has strayed beyond max leash radius while grinding or in combat,
+    // break off combat and return to follow the master immediately.
+    if (PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot))
+    {
+        if (Player* master = ai->GetMaster())
+        {
+            if (master->IsInWorld() && master->GetMap() == bot->GetMap())
+            {
+                float leashLimit = sAzerothFriendConfig->grindMaxLeashRadius;
+                if (bot->GetDistance(master) > leashLimit)
+                {
+                    bool isGrinding = ai->HasStrategy("grind", BOT_STATE_NON_COMBAT) || ai->HasStrategy("grind", BOT_STATE_COMBAT);
+                    if (isGrinding || bot->IsInCombat())
+                    {
+                        LOG_INFO("server.loading", "[AzerothFriend] Bot {} exceeded leash distance ({:.1f} > {:.1f}y) from master {} - returning to formation",
+                                 bot->GetName(), bot->GetDistance(master), leashLimit, master->GetName());
+                        ai->ChangeStrategy("-grind", BOT_STATE_NON_COMBAT);
+                        ai->ChangeStrategy("-grind", BOT_STATE_COMBAT);
+                        ai->Reset();
+                        AzerothFriendPlayerbotActions::FollowMaster(bot);
+                        InterruptBotPlan(botGuid, "leash_distance_exceeded", true);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+#endif
+
     auto it = _activeActions.find(botGuid);
     if (it != _activeActions.end())
     {
@@ -1105,6 +1149,7 @@ void AzerothFriendActionDispatcher::StartClaimedStep(Player* bot, BotClaimedStep
     active.lastProgressCheck = now;
     active.lastCheckX = bot->GetPositionX();
     active.lastCheckY = bot->GetPositionY();
+    active.authority = claimed.authority;
 
     if (!AzerothFriendActionRegistry::IsCurated(claimed.actionType))
     {
@@ -1138,8 +1183,8 @@ void AzerothFriendActionDispatcher::StartClaimedStep(Player* bot, BotClaimedStep
         }
     }
 
-    // Combat Supremacy Gate: If bot or master is in combat, yield 100% to mod-playerbots BOT_STATE_COMBAT
-    if (AzerothFriendAiControl::IsInCombatSupremacy(bot))
+    // Combat Supremacy Gate: Only peaceful autonomous actions yield to combat supremacy
+    if (AzerothFriendAiControl::IsInCombatSupremacy(bot) && !IsCombatOrSurvivalAction(claimed.actionType) && claimed.authority != "owner_command")
     {
         CompleteStep(bot, active, "", false, "yielded_to_combat_supremacy");
         CancelRemainingSteps(bot, claimed.planId, "yielded to native playerbot combat supremacy");
@@ -1501,6 +1546,9 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
     {
         uint32 guid = ExtractJsonUint(paramsJson, "guid");
         std::string name = ExtractJsonString(paramsJson, "name");
+        std::string target = ExtractJsonString(paramsJson, "target");
+        if (name.empty())
+            name = target;
 
         WorldObject* object = nullptr;
         if (guid)
@@ -1510,20 +1558,28 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
         {
             std::string nameLower = name;
             std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
+            Creature* nearestMatch = nullptr;
+            float nearestDist = 60.0f;
             for (auto const& pair : bot->GetMap()->GetCreatureBySpawnIdStore())
             {
                 Creature* creature = pair.second;
-                if (creature && creature->IsInWorld())
+                if (creature && creature->IsInWorld() && creature->IsAlive())
                 {
                     std::string cName = creature->GetName();
                     std::transform(cName.begin(), cName.end(), cName.begin(), ::tolower);
-                    if (cName.find(nameLower) != std::string::npos)
+                    if (cName.find(nameLower) != std::string::npos || nameLower.find(cName) != std::string::npos)
                     {
-                        object = creature;
-                        break;
+                        float d = bot->GetDistance(creature);
+                        if (d < nearestDist)
+                        {
+                            nearestDist = d;
+                            nearestMatch = creature;
+                        }
                     }
                 }
             }
+            if (nearestMatch)
+                object = nearestMatch;
         }
 
         if (!object)
@@ -1616,12 +1672,159 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
 
     if (actionType == "wander")
     {
-        if (!AzerothFriendAiControl::ApplyMode(bot, "default") ||
-            !AzerothFriendPlayerbotActions::DoAction(bot, "move random"))
+        if (!AzerothFriendAiControl::ApplyMode(bot, "default"))
             return Fail("wander_failed");
+
+        Player* master = nullptr;
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot))
+            master = ai->GetMaster();
+#endif
+        if (!master)
+            master = bot;
+
+        float wanderRadius = sAzerothFriendConfig->grindSearchRadius;
+        std::string distStr = ExtractJsonString(paramsJson, "distance");
+        if (distStr.empty()) distStr = ExtractJsonString(paramsJson, "radius");
+        if (!distStr.empty())
+        {
+            try { float cd = std::stof(distStr); if (cd >= 10.0f && cd <= sAzerothFriendConfig->grindMaxLeashRadius) wanderRadius = cd; } catch (...) {}
+        }
+
+        float angle = static_cast<float>(rand()) / static_cast<float>(RAND_MAX) * 2.0f * 3.14159265358979323846f;
+        float minDist = std::min(25.0f, wanderRadius * 0.4f);
+        float dist = minDist;
+        if (wanderRadius > minDist)
+            dist += (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * (wanderRadius - minDist);
+
+        float roamX = master->GetPositionX() + dist * std::cos(angle);
+        float roamY = master->GetPositionY() + dist * std::sin(angle);
+        float roamZ = master->GetPositionZ();
+        if (bot->GetMap())
+        {
+            float groundZ = bot->GetMap()->GetHeight(bot->GetPhaseMask(), roamX, roamY, roamZ);
+            if (!std::isnan(groundZ) && !std::isinf(groundZ) && std::fabs(groundZ - roamZ) <= 15.0f)
+                roamZ = groundZ;
+        }
+
+        bool moved = AzerothFriendPlayerbotActions::MoveToCoords(bot, roamX, roamY, roamZ, 2.0f);
+        if (!moved)
+            AzerothFriendPlayerbotActions::DoAction(bot, "move random");
+
         plan.kind = AFStepKind::Immediate;
         plan.followUpAction = "__handoff";
-        plan.result = Payload("\"mode\":\"wander\"");
+        plan.result = Payload("\"mode\":\"wander\",\"radius\":" + std::to_string(wanderRadius) +
+                              ",\"x\":" + std::to_string(roamX) + ",\"y\":" + std::to_string(roamY) + ",\"z\":" + std::to_string(roamZ));
+        return true;
+    }
+
+    if (actionType == "grind_nearby" || actionType == "roam_nearby" || actionType == "roam")
+    {
+        float searchRadius = sAzerothFriendConfig->grindSearchRadius;
+        std::string radiusStr = ExtractJsonString(paramsJson, "radius");
+        if (!radiusStr.empty())
+        {
+            try
+            {
+                float customRadius = std::stof(radiusStr);
+                if (customRadius >= 10.0f && customRadius <= sAzerothFriendConfig->grindMaxLeashRadius)
+                    searchRadius = customRadius;
+            }
+            catch (...) {}
+        }
+
+        Player* master = nullptr;
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot))
+            master = ai->GetMaster();
+#endif
+        if (!master)
+            master = bot;
+
+        // Scan for nearest valid attack target creature within searchRadius of master
+        Creature* bestTarget = nullptr;
+        float bestDist = searchRadius + 1.0f;
+
+        if (bot->GetMap())
+        {
+            for (auto const& pair : bot->GetMap()->GetCreatureBySpawnIdStore())
+            {
+                Creature* c = pair.second;
+                if (!c || !c->IsInWorld() || c->isDead())
+                    continue;
+
+                float distToMaster = master->GetDistance(c);
+                if (distToMaster > searchRadius)
+                    continue;
+
+                if (!bot->IsWithinLOSInMap(c))
+                    continue;
+
+                if (!bot->IsValidAttackTarget(c))
+                    continue;
+
+                // Ambient civilians shouldn't trigger grind unless already hostile/threat
+                if (c->IsCivilian() && !c->IsInCombat())
+                    continue;
+
+                if (distToMaster < bestDist)
+                {
+                    bestDist = distToMaster;
+                    bestTarget = c;
+                }
+            }
+        }
+
+        if (bestTarget)
+        {
+            AzerothFriendAiControl::ApplyMode(bot, "combat");
+            AzerothFriendPlayerbotActions::ChangeStrategies(bot, "+follow,+grind,+combat,+loot", false);
+            AzerothFriendPlayerbotActions::ChangeStrategies(bot, "+follow,+grind,+combat,+loot", true);
+
+            std::string attackCmd = "attack " + std::to_string(bestTarget->GetGUID().GetCounter());
+            AzerothFriendPlayerbotActions::DoCommand(bot, attackCmd);
+
+            plan.kind = AFStepKind::Immediate;
+            plan.followUpAction = "__handoff";
+            plan.result = Payload("\"target\":\"" + AzerothFriendShared::EscapeJsonString(bestTarget->GetName()) +
+                                  "\",\"guid\":" + std::to_string(bestTarget->GetGUID().GetCounter()) +
+                                  ",\"distance\":" + std::to_string(bestDist) +
+                                  ",\"action\":\"attack\",\"strategy\":\"+grind\"");
+            return true;
+        }
+
+        // No hostile mob found in immediate range: explore nearby path / roam around master in wider perimeter
+        AzerothFriendAiControl::ApplyMode(bot, "combat");
+        AzerothFriendPlayerbotActions::ChangeStrategies(bot, "+follow,+grind,+loot", false);
+
+        // Generate random angle and distance [minDist, searchRadius] around master
+        float angle = static_cast<float>(rand()) / static_cast<float>(RAND_MAX) * 2.0f * 3.14159265358979323846f;
+        float minDist = std::min(25.0f, searchRadius * 0.4f);
+        float dist = minDist;
+        if (searchRadius > minDist)
+            dist += (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * (searchRadius - minDist);
+
+        float roamX = master->GetPositionX() + dist * std::cos(angle);
+        float roamY = master->GetPositionY() + dist * std::sin(angle);
+        float roamZ = master->GetPositionZ();
+
+        if (bot->GetMap())
+        {
+            float groundZ = bot->GetMap()->GetHeight(bot->GetPhaseMask(), roamX, roamY, roamZ);
+            if (!std::isnan(groundZ) && !std::isinf(groundZ) && std::fabs(groundZ - roamZ) <= 15.0f)
+                roamZ = groundZ;
+        }
+
+        bool moved = AzerothFriendPlayerbotActions::MoveToCoords(bot, roamX, roamY, roamZ, 2.0f);
+        if (!moved)
+        {
+            AzerothFriendPlayerbotActions::DoAction(bot, "move random");
+        }
+
+        plan.kind = AFStepKind::Immediate;
+        plan.followUpAction = "__handoff";
+        plan.result = Payload("\"action\":\"roam_nearby\",\"radius\":" + std::to_string(searchRadius) +
+                              ",\"x\":" + std::to_string(roamX) + ",\"y\":" + std::to_string(roamY) + ",\"z\":" + std::to_string(roamZ));
         return true;
     }
 
@@ -2730,7 +2933,8 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
         // Living downtime routine: pitch a basic campfire or sit by the fire in the wilderness
         uint32 fireSpellId = 818; // Basic Campfire
         bool ok = false;
-        if (bot->HasSpell(fireSpellId))
+        GameObject* existingFire = bot->FindNearestGameObjectOfType(GAMEOBJECT_TYPE_SPELL_FOCUS, 15.0f);
+        if (!existingFire && bot->HasSpell(fireSpellId))
             ok = AzerothFriendBotController::CastSpell(bot, fireSpellId, 0, nullptr);
         if (!ok)
             ok = AzerothFriendPlayerbotActions::DoCommand(bot, "sit");
@@ -2809,6 +3013,29 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
 
         if (text.empty())
             return Fail("say requires text");
+
+        if (text.rfind("[FRIEND_", 0) == 0 || text.rfind("[AF", 0) == 0)
+        {
+            size_t endTag = text.find(']');
+            if (endTag != std::string::npos)
+            {
+                std::string tag = text.substr(1, endTag - 1);
+                std::string payload = text.substr(endTag + 1);
+                size_t start = payload.find_first_not_of(" \t");
+                if (start != std::string::npos)
+                    payload = payload.substr(start);
+
+                std::string targetName = ExtractJsonString(paramsJson, "target");
+                Player* target = nullptr;
+                if (!targetName.empty())
+                    target = ObjectAccessor::FindPlayerByName(targetName.c_str());
+
+                AzerothFriendShared::SendTelemetry(bot, tag, payload, target);
+                plan.kind = AFStepKind::Immediate;
+                plan.result = Payload("\"spoken\":true");
+                return true;
+            }
+        }
 
         bool ok = AzerothFriendBotController::Say(bot, text, channel);
         if (!ok)

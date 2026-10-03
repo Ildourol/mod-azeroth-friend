@@ -14,6 +14,39 @@ local function SendChatMessage(message, channel, language, target)
     NativeSendChatMessage(message, "SAY")
 end
 
+local AFThinking = { actions = 0, both = 0, short = 0, long = 0 }
+
+function AFRequestSuggestions(scope)
+    scope = (scope and scope ~= "") and scope:lower() or "both"
+    if scope == "action" then scope = "actions" end
+    local now = GetTime()
+    if scope == "both" then
+        AFThinking["both"] = now + 15
+        AFThinking["long"] = now + 15
+        AFThinking["short"] = now + 15
+        AFThinking["actions"] = now + 15
+    else
+        AFThinking[scope] = now + 15
+    end
+
+    local btnBoth = _G["AzerothFriendSuggestBothBtn"]
+    local btnLong = _G["AzerothFriendLongSuggestBtn"]
+    local btnShort = _G["AzerothFriendShortSuggestBtn"]
+    local btnAct = _G["AzerothFriendActionSuggestBtn"]
+
+    if AFThinking["both"] > now and btnBoth then btnBoth:SetText("Thinking..."); btnBoth:Disable() end
+    if AFThinking["long"] > now and btnLong then btnLong:SetText("Thinking..."); btnLong:Disable() end
+    if AFThinking["short"] > now and btnShort then btnShort:SetText("Thinking..."); btnShort:Disable() end
+    if AFThinking["actions"] > now and btnAct then btnAct:SetText("Thinking..."); btnAct:Disable() end
+
+    local botName = BotCache.name
+    if botName and botName ~= "" then
+        SendChatMessage(".af suggest " .. botName .. " " .. scope)
+    else
+        SendChatMessage(".af suggest " .. scope)
+    end
+end
+
 -- Color formatting constants
 local COLORS = {
     HEADER    = "|cFFFFD700", -- Gold
@@ -163,6 +196,12 @@ local BotCache = {
     heardLog = {},
     thoughtHistory = {},
     surroundings = {},
+    suggestedActions = "",
+    actionSummary = "",
+    longTermGoal = "",
+    currentGoal = "",
+    goalStatus = "paused",
+    autonomyEnabled = false,
 }
 
 -- Forward declarations used by telemetry handlers and UI callbacks.
@@ -747,6 +786,7 @@ local function FormatActionsText()
     table.insert(out, COLORS.CYAN .. "  /af trainer" .. COLORS.RESET .. COLORS.MUTED .. "       - Learn available class spells" .. COLORS.RESET)
     table.insert(out, COLORS.CYAN .. "  /af claim / release" .. COLORS.RESET .. COLORS.MUTED .. " - Toggle companion agency lock" .. COLORS.RESET)
     table.insert(out, COLORS.CYAN .. "  /af action [cmd]" .. COLORS.RESET .. COLORS.MUTED .. "   - Dispatch any catalog action directly" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "  /af goal generate [scope]" .. COLORS.RESET .. COLORS.MUTED .. " - Generate contextual goals (both|long|short)" .. COLORS.RESET)
     table.insert(out, COLORS.CYAN .. "  /af goal set [text]" .. COLORS.RESET .. COLORS.MUTED .. " - Set the focused goal (panel: /af goals)" .. COLORS.RESET)
     table.insert(out, COLORS.CYAN .. "  /af autonomy on|off" .. COLORS.RESET .. COLORS.MUTED .. " - Opt in to self-directed operation" .. COLORS.RESET)
     table.insert(out, COLORS.CYAN .. "  /af cast [spell] [target]" .. COLORS.RESET .. COLORS.MUTED .. " - Request a spell in natural language" .. COLORS.RESET)
@@ -1045,6 +1085,15 @@ local function FormatThoughtsText()
                 elseif hMindset == "RESTING" then mColor = COLORS.CYAN
                 end
 
+                local badgeTag = mColor .. "[" .. hMindset .. "]" .. COLORS.RESET
+                local hSrc = tostring(h.source or "")
+                local hTh = tostring(h.thought or "")
+                if hSrc == "ai_tactics" or hTh:find("Tactical routine") or hTh:find("ai_tactics") then
+                    badgeTag = COLORS.CYAN .. "[TACTICAL]" .. COLORS.RESET
+                elseif hSrc == "owner_action" or hTh:find("Executing ordered tactical action") or hTh:find("owner_action") then
+                    badgeTag = COLORS.ORANGE .. "[ACTION]" .. COLORS.RESET
+                end
+
                 local timeRange = tostring(h.time or "")
                 if h.lastTime and h.lastTime ~= h.time then
                     timeRange = timeRange .. " - " .. tostring(h.lastTime)
@@ -1061,7 +1110,7 @@ local function FormatThoughtsText()
                     end
                 else
                     local repeatTag = (h.count and h.count > 1) and (" " .. COLORS.GOLD .. "(x" .. h.count .. ")" .. COLORS.RESET) or ""
-                    table.insert(out, COLORS.MUTED .. "[" .. timeRange .. "] " .. mColor .. "[" .. hMindset .. "]" .. COLORS.RESET .. " " .. COLORS.VALUE .. tostring(h.thought or "") .. repeatTag .. COLORS.RESET)
+                    table.insert(out, COLORS.MUTED .. "[" .. timeRange .. "] " .. badgeTag .. " " .. COLORS.VALUE .. tostring(h.thought or "") .. repeatTag .. COLORS.RESET)
                 end
             end
         end
@@ -1213,20 +1262,80 @@ RefreshMasterTab = function()
                              COLORS.MUTED .. " | Next Queued: " .. COLORS.RESET .. COLORS.SUBHEADER .. BotCache.nextAction .. COLORS.RESET)
                 pStatus:SetText(table.concat(stLines, "\n"))
             end
-            -- Goals replace the old mindset toggles: the owner sets purpose, the
-            -- planner picks the mindset and reports it read-only.
+            -- Thinking state management & debounce protection
+            local now = GetTime()
+            local btnBoth = _G["AzerothFriendSuggestBothBtn"]
+            if btnBoth then
+                if AFThinking["both"] and AFThinking["both"] > now then
+                    btnBoth:SetText("Thinking...")
+                    btnBoth:Disable()
+                else
+                    btnBoth:SetText("Suggest All")
+                    btnBoth:Enable()
+                end
+            end
+            local btnLong = _G["AzerothFriendLongSuggestBtn"]
+            if btnLong then
+                if AFThinking["long"] and AFThinking["long"] > now then
+                    btnLong:SetText("Thinking...")
+                    btnLong:Disable()
+                else
+                    btnLong:SetText("Suggest")
+                    btnLong:Enable()
+                end
+            end
+            local btnShort = _G["AzerothFriendShortSuggestBtn"]
+            if btnShort then
+                if AFThinking["short"] and AFThinking["short"] > now then
+                    btnShort:SetText("Thinking...")
+                    btnShort:Disable()
+                else
+                    btnShort:SetText("Suggest")
+                    btnShort:Enable()
+                end
+            end
+            local btnAct = _G["AzerothFriendActionSuggestBtn"]
+            if btnAct then
+                if AFThinking["actions"] and AFThinking["actions"] > now then
+                    btnAct:SetText("Thinking...")
+                    btnAct:Disable()
+                else
+                    btnAct:SetText("Suggest")
+                    btnAct:Enable()
+                end
+            end
+
             local goal = AFGetGoalState and AFGetGoalState() or nil
             local goalStatus = _G["AzerothFriendGoalStatusText"]
+            local longGoal = (goal and goal.long_goal and goal.long_goal ~= "") and goal.long_goal or (BotCache.longTermGoal ~= "" and BotCache.longTermGoal or "not set")
+            local shortGoal = (goal and goal.goal and goal.goal ~= "") and goal.goal or (BotCache.currentGoal ~= "" and BotCache.currentGoal or "not set")
+            local suggestedActions = (goal and goal.suggested_actions and goal.suggested_actions ~= "") and goal.suggested_actions or (BotCache.suggestedActions or "")
+            local actionSummary = (goal and goal.action_summary and goal.action_summary ~= "") and goal.action_summary or (BotCache.actionSummary or "")
+            local status = (goal and goal.status) or BotCache.goalStatus or "Unknown"
+            local enabled = ((goal and goal.enabled) or BotCache.autonomyEnabled) and "ON" or "OFF"
+
+            local actEdit = _G["AzerothFriendActionEdit"]
+            local actSummary = _G["AzerothFriendActionSummaryText"]
+            if actEdit and not actEdit:HasFocus() and suggestedActions ~= "" then
+                actEdit:SetText(suggestedActions)
+            end
+            if actSummary then
+                local cogThought = (BotCache.thought and BotCache.thought ~= "" and BotCache.thought ~= "None") and BotCache.thought or "Awaiting companion guidance..."
+                if actionSummary ~= "" then
+                    actSummary:SetText(COLORS.LABEL .. "Tactical Summary: " .. COLORS.RESET .. COLORS.VALUE .. actionSummary .. COLORS.RESET .. "\n" ..
+                                       COLORS.LABEL .. "Cognitive Thought: " .. COLORS.RESET .. COLORS.CYAN .. cogThought .. COLORS.RESET)
+                else
+                    actSummary:SetText(COLORS.MUTED .. "Click 'Suggest' to get fresh AI recommended actions." .. COLORS.RESET .. "\n" ..
+                                       COLORS.LABEL .. "Cognitive Thought: " .. COLORS.RESET .. COLORS.CYAN .. cogThought .. COLORS.RESET)
+                end
+            end
+
             if goalStatus then
-                local longGoal = (goal and goal.long_goal and goal.long_goal ~= "") and goal.long_goal or "not set"
-                local shortGoal = (goal and goal.goal and goal.goal ~= "") and goal.goal or "not set"
-                local status = (goal and goal.status) or "Unknown"
-                local enabled = (goal and goal.enabled) and "ON" or "OFF"
                 local actColor = COLORS.CYAN
                 local actDesc = "+travel,+follow"
                 if actMode == "combat" then
                     actColor = COLORS.ALERT
-                    actDesc = "+grind,+combat,+loot"
+                    actDesc = "+follow,+grind,+combat,+loot"
                 elseif actMode == "idle" then
                     actColor = COLORS.SUCCESS
                     actDesc = "+stay,-follow"
@@ -1234,16 +1343,32 @@ RefreshMasterTab = function()
                     actColor = "|cFFDA70D6"
                     actDesc = "+rpg,-grind"
                 end
+                local sugActionLine = ""
+                if suggestedActions ~= "" then
+                    sugActionLine = "\n" .. COLORS.SUBHEADER .. "RECOMMENDED ACTIONS: " .. COLORS.RESET ..
+                        COLORS.CYAN .. suggestedActions .. COLORS.RESET ..
+                        (actionSummary ~= "" and (COLORS.MUTED .. " (" .. actionSummary .. ")" .. COLORS.RESET) or "")
+                end
                 goalStatus:SetText(
                     COLORS.SUBHEADER .. "ACTION MODE (Tactical Posture): " .. COLORS.RESET ..
                     actColor .. actMode:upper() .. COLORS.RESET .. COLORS.MUTED .. " (" .. actDesc .. ")" .. COLORS.RESET .. "\n" ..
                     COLORS.SUBHEADER .. "CORE PURPOSE (Long-Term): " .. COLORS.RESET .. "\n" ..
                     COLORS.VALUE .. longGoal .. COLORS.RESET .. "\n" ..
                     COLORS.SUBHEADER .. "CURRENT OBJECTIVE (Short-Term): " .. COLORS.RESET .. "\n" ..
-                    COLORS.VALUE .. shortGoal .. COLORS.RESET .. "\n" ..
+                    COLORS.VALUE .. shortGoal .. COLORS.RESET ..
+                    sugActionLine .. "\n" ..
                     COLORS.MUTED .. "Status: " .. COLORS.RESET .. COLORS.VALUE .. status .. COLORS.RESET ..
                     COLORS.MUTED .. " | Autonomy: " .. COLORS.RESET .. COLORS.VALUE .. enabled .. COLORS.RESET ..
                     COLORS.MUTED .. " | Mindset (read-only): " .. COLORS.RESET .. COLORS.VALUE .. (BotCache.mindset or "IDLE") .. COLORS.RESET)
+
+                local longEditBox = _G["AzerothFriendLongGoalEdit"]
+                local shortEditBox = _G["AzerothFriendShortGoalEdit"]
+                if longEditBox and not longEditBox:HasFocus() and longGoal ~= "not set" then
+                    longEditBox:SetText(longGoal)
+                end
+                if shortEditBox and not shortEditBox:HasFocus() and shortGoal ~= "not set" then
+                    shortEditBox:SetText(shortGoal)
+                end
             end
         end
     elseif tab == 5 then
@@ -1486,7 +1611,7 @@ local function ProcessMessage(msg)
                 elseif kl == "thinkingcadence" then
                     BotCache.thinkingCadence = v:lower()
                     if AzerothFriendBtnThinking then
-                        local tc = BotCache.thinkingCadence or "normal"
+                        local tc = BotCache.thinkingCadence or "low"
                         if tc == "low" then
                             AzerothFriendBtnThinking:SetText("Think: LOW")
                         elseif tc == "high" then
@@ -1597,11 +1722,79 @@ local function ProcessMessage(msg)
         RefreshMasterTab()
         return true
 
+    -- 3d. [FRIEND_GOAL] (Dynamic AI Goal & Tactical Action Suggestions)
+    elseif msg:match("^%[FRIEND_GOAL%]") then
+        local raw = msg:match("^%[FRIEND_GOAL%]%s*(.*)$")
+        local decoded = AFDecodeObject and AFDecodeObject(raw)
+        local hasActions = false
+        if decoded and type(decoded) == "table" then
+            if decoded.bot then BotCache.name = decoded.bot end
+            if decoded.goal then BotCache.currentGoal = decoded.goal end
+            if decoded.long_goal then BotCache.longTermGoal = decoded.long_goal end
+            if decoded.suggested_actions and decoded.suggested_actions ~= "" then
+                BotCache.suggestedActions = decoded.suggested_actions
+                hasActions = true
+            end
+            if decoded.action_summary and decoded.action_summary ~= "" then
+                BotCache.actionSummary = decoded.action_summary
+            end
+            if decoded.status then BotCache.goalStatus = decoded.status end
+            if decoded.enabled ~= nil then BotCache.autonomyEnabled = decoded.enabled end
+        else
+            for _, line in ipairs(UnflattenLines(raw)) do
+                local k, v = line:match("^([^:]+):%s*(.+)$")
+                if k and v then
+                    local kl = k:lower()
+                    if kl == "goal" or kl == "short" then BotCache.currentGoal = v
+                    elseif kl == "long_goal" or kl == "long" or kl == "purpose" then BotCache.longTermGoal = v
+                    elseif kl == "suggested_actions" or kl == "action" or kl == "actions" then
+                        BotCache.suggestedActions = v
+                        hasActions = true
+                    elseif kl == "action_summary" or kl == "summary" then BotCache.actionSummary = v
+                    elseif kl == "status" then BotCache.goalStatus = v
+                    elseif kl == "bot" then BotCache.name = v
+                    end
+                end
+            end
+        end
+
+        local shortEdit = _G["AzerothFriendShortGoalEdit"]
+        if shortEdit and not shortEdit:HasFocus() and BotCache.currentGoal and BotCache.currentGoal ~= "" then
+            shortEdit:SetText(BotCache.currentGoal)
+        end
+        local longEdit = _G["AzerothFriendLongGoalEdit"]
+        if longEdit and not longEdit:HasFocus() and BotCache.longTermGoal and BotCache.longTermGoal ~= "" then
+            longEdit:SetText(BotCache.longTermGoal)
+        end
+        local actionEdit = _G["AzerothFriendActionEdit"]
+        if actionEdit and not actionEdit:HasFocus() and BotCache.suggestedActions and BotCache.suggestedActions ~= "" then
+            actionEdit:SetText(BotCache.suggestedActions)
+        end
+
+        if AFProcessExtension then
+            pcall(AFProcessExtension, msg)
+        end
+
+        if hasActions then
+            AFThinking["actions"] = 0
+            AFThinking["both"] = 0
+        end
+        if not hasActions or (decoded and (decoded.goal or decoded.long_goal)) then
+            AFThinking["short"] = 0
+            AFThinking["long"] = 0
+            if not AFThinking["actions"] or AFThinking["actions"] == 0 then
+                AFThinking["both"] = 0
+            end
+        end
+        RefreshMasterTab()
+        return true
+
     -- 4. [FRIEND_THOUGHT]
     elseif msg:match("^%[FRIEND_THOUGHT%]") then
         local raw = msg:sub(17):gsub("^%s+", "")
         local newThought = nil
         local newMindset = nil
+        local newSource = nil
         local sawKnownField = false
         for _, line in ipairs(UnflattenLines(raw)) do
             local k, v = line:match("^([^:]+):%s*(.+)$")
@@ -1671,6 +1864,9 @@ local function ProcessMessage(msg)
                 elseif kl:find("reasoning") or kl:find("deep") then
                     BotCache.deepReasoning = v
                     sawKnownField = true
+                elseif kl:find("source") or kl:find("src") then
+                    newSource = v
+                    sawKnownField = true
                 elseif kl:find("mindset") then
                     BotCache.mindset = v
                     newMindset = v
@@ -1695,6 +1891,14 @@ local function ProcessMessage(msg)
             end
         end
 
+        if not newSource and newThought then
+            if newThought:find("Tactical routine") or newThought:find("ai_tactics") then
+                newSource = "ai_tactics"
+            elseif newThought:find("Executing ordered tactical action") or newThought:find("owner_action") then
+                newSource = "owner_action"
+            end
+        end
+
         -- Record into real-time thought timeline with grouping & encounter awareness
         if newThought and newThought ~= "" and newThought ~= "None" then
             local curMindset = (newMindset or BotCache.mindset or "IDLE"):upper()
@@ -1708,15 +1912,17 @@ local function ProcessMessage(msg)
                 -- Same thought repeated: increment repeat counter and update last observed timestamp
                 lastH.count = (lastH.count or 1) + 1
                 lastH.lastTime = nowTime
+                if newSource then lastH.source = newSource end
             elseif curMindset == "COMBAT" and lastH and lastH.mindset == "COMBAT" and lastH.isEncounter and (BotCache.target and BotCache.target ~= "None" and lastH.target == BotCache.target) then
                 -- Same combat encounter target: group into encounter sequence
                 lastH.count = (lastH.count or 1) + 1
                 lastH.lastTime = nowTime
+                if newSource then lastH.source = newSource end
                 if not lastH.actions then lastH.actions = {} end
                 if #lastH.actions < 5 then
-                    table.insert(lastH.actions, { time = nowTime, text = newThought })
+                    table.insert(lastH.actions, { time = nowTime, text = newThought, source = newSource })
                 else
-                    lastH.actions[#lastH.actions] = { time = nowTime, text = newThought }
+                    lastH.actions[#lastH.actions] = { time = nowTime, text = newThought, source = newSource }
                 end
                 lastH.thought = newThought
             else
@@ -1727,10 +1933,11 @@ local function ProcessMessage(msg)
                     lastTime = nowTime,
                     mindset = curMindset,
                     thought = newThought,
+                    source = newSource,
                     count = 1,
                     isEncounter = isCombat,
                     target = isCombat and (BotCache.target or "Enemy") or nil,
-                    actions = isCombat and { { time = nowTime, text = newThought } } or nil
+                    actions = isCombat and { { time = nowTime, text = newThought, source = newSource } } or nil
                 }
                 table.insert(BotCache.thoughtHistory, entry)
                 if #BotCache.thoughtHistory > 8 then
@@ -2095,11 +2302,14 @@ end
 
 -- Initialize Master HUD and wire buttons
 local function InitializeMasterFrame()
-    SetupFrame(AzerothFriendMasterFrame, AzerothFriendMasterFrameTitleBar, 620, 380)
+    SetupFrame(AzerothFriendMasterFrame, AzerothFriendMasterFrameTitleBar, 620, 420)
     -- Layouts saved before the autonomy switch was added are narrower than the
     -- control bar needs; widen them instead of letting the switch clip.
     if AzerothFriendMasterFrame:GetWidth() < 620 then
         AzerothFriendMasterFrame:SetWidth(620)
+    end
+    if AzerothFriendMasterFrame:GetHeight() < 420 then
+        AzerothFriendMasterFrame:SetHeight(420)
     end
 
     -- Dedicated Interactive Actions Panel (Tab 4) with Checkbox Catalog
@@ -2124,6 +2334,16 @@ local function InitializeMasterFrame()
     goalHeader:SetPoint("TOPLEFT", pipelineStatus, "BOTTOMLEFT", 0, -12)
     goalHeader:SetText(COLORS.SUBHEADER .. "Companion Goals (the agent's enduring purpose):" .. COLORS.RESET)
 
+    local suggestBothBtn = CreateFrame("Button", "AzerothFriendSuggestBothBtn", actionsPanel, "UIPanelButtonTemplate")
+    suggestBothBtn:SetSize(130, 22)
+    suggestBothBtn:SetPoint("TOPRIGHT", actionsPanel, "TOPRIGHT", -10, -50)
+    suggestBothBtn:SetText("Suggest All")
+    suggestBothBtn:SetScript("OnClick", function(self)
+        self:SetText("Thinking...")
+        AFRequestSuggestions("both")
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Requesting fresh AI suggestions for goals and actions...")
+    end)
+
     local goalHelp = actionsPanel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     goalHelp:SetPoint("TOPLEFT", goalHeader, "BOTTOMLEFT", 0, -2)
     goalHelp:SetText("Long-term guides everything; the agent derives and adopts its own short-term objectives from it.")
@@ -2135,13 +2355,13 @@ local function InitializeMasterFrame()
     local longEdit = CreateFrame("EditBox", "AzerothFriendLongGoalEdit", actionsPanel, "InputBoxTemplate")
     longEdit:SetHeight(22)
     longEdit:SetPoint("TOPLEFT", longLabel, "BOTTOMLEFT", 4, -4)
-    longEdit:SetPoint("TOPRIGHT", actionsPanel, "TOPRIGHT", -120, -0)
+    longEdit:SetPoint("TOPRIGHT", actionsPanel, "TOPRIGHT", -180, -0)
     longEdit:SetAutoFocus(false)
     longEdit:SetMaxLetters(2000)
     longEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
     local longSet = CreateFrame("Button", nil, actionsPanel, "UIPanelButtonTemplate")
-    longSet:SetSize(96, 22)
+    longSet:SetSize(86, 22)
     longSet:SetText("Set purpose")
     longSet:SetPoint("LEFT", longEdit, "RIGHT", 6, 0)
     longSet:SetScript("OnClick", function()
@@ -2152,6 +2372,16 @@ local function InitializeMasterFrame()
         print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Long-term goal sent: " .. text)
     end)
 
+    local longSuggest = CreateFrame("Button", "AzerothFriendLongSuggestBtn", actionsPanel, "UIPanelButtonTemplate")
+    longSuggest:SetSize(76, 22)
+    longSuggest:SetText("Suggest")
+    longSuggest:SetPoint("LEFT", longSet, "RIGHT", 4, 0)
+    longSuggest:SetScript("OnClick", function(self)
+        self:SetText("Thinking...")
+        AFRequestSuggestions("long")
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Requesting fresh AI purpose suggestion...")
+    end)
+
     local shortLabel = actionsPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     shortLabel:SetPoint("TOPLEFT", longEdit, "BOTTOMLEFT", -4, -10)
     shortLabel:SetText(COLORS.LABEL .. "Short-term (what it is doing now):" .. COLORS.RESET)
@@ -2159,13 +2389,13 @@ local function InitializeMasterFrame()
     local shortEdit = CreateFrame("EditBox", "AzerothFriendShortGoalEdit", actionsPanel, "InputBoxTemplate")
     shortEdit:SetHeight(22)
     shortEdit:SetPoint("TOPLEFT", shortLabel, "BOTTOMLEFT", 4, -4)
-    shortEdit:SetPoint("TOPRIGHT", actionsPanel, "TOPRIGHT", -120, -0)
+    shortEdit:SetPoint("TOPRIGHT", actionsPanel, "TOPRIGHT", -180, -0)
     shortEdit:SetAutoFocus(false)
     shortEdit:SetMaxLetters(255)
     shortEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
     local shortSet = CreateFrame("Button", nil, actionsPanel, "UIPanelButtonTemplate")
-    shortSet:SetSize(96, 22)
+    shortSet:SetSize(86, 22)
     shortSet:SetText("Set objective")
     shortSet:SetPoint("LEFT", shortEdit, "RIGHT", 6, 0)
     shortSet:SetScript("OnClick", function()
@@ -2176,8 +2406,64 @@ local function InitializeMasterFrame()
         print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Short-term goal sent: " .. text)
     end)
 
+    local shortSuggest = CreateFrame("Button", "AzerothFriendShortSuggestBtn", actionsPanel, "UIPanelButtonTemplate")
+    shortSuggest:SetSize(76, 22)
+    shortSuggest:SetText("Suggest")
+    shortSuggest:SetPoint("LEFT", shortSet, "RIGHT", 4, 0)
+    shortSuggest:SetScript("OnClick", function(self)
+        self:SetText("Thinking...")
+        AFRequestSuggestions("short")
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Requesting fresh AI objective suggestion...")
+    end)
+
+    -- Tactical Action Recommendation row
+    local actionLabel = actionsPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    actionLabel:SetPoint("TOPLEFT", shortEdit, "BOTTOMLEFT", -4, -10)
+    actionLabel:SetText(COLORS.LABEL .. "Suggested Actions (AI tactical recommendation):" .. COLORS.RESET)
+
+    local actionEdit = CreateFrame("EditBox", "AzerothFriendActionEdit", actionsPanel, "InputBoxTemplate")
+    actionEdit:SetHeight(22)
+    actionEdit:SetPoint("TOPLEFT", actionLabel, "BOTTOMLEFT", 4, -4)
+    actionEdit:SetPoint("TOPRIGHT", actionsPanel, "TOPRIGHT", -180, 0)
+    actionEdit:SetAutoFocus(false)
+    actionEdit:SetMaxLetters(500)
+    actionEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    local actionRun = CreateFrame("Button", "AzerothFriendActionRunBtn", actionsPanel, "UIPanelButtonTemplate")
+    actionRun:SetSize(86, 22)
+    actionRun:SetText("Run Action")
+    actionRun:SetPoint("LEFT", actionEdit, "RIGHT", 6, 0)
+    actionRun:SetScript("OnClick", function()
+        local text = (actionEdit:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then return end
+        local botName = BotCache.name
+        if botName and botName ~= "" then
+            SendChatMessage(".af action " .. botName .. " " .. text)
+        else
+            SendChatMessage(".af action " .. text)
+        end
+        actionEdit:ClearFocus()
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Dispatched action: " .. text)
+    end)
+
+    local actionSuggest = CreateFrame("Button", "AzerothFriendActionSuggestBtn", actionsPanel, "UIPanelButtonTemplate")
+    actionSuggest:SetSize(76, 22)
+    actionSuggest:SetText("Suggest")
+    actionSuggest:SetPoint("LEFT", actionRun, "RIGHT", 4, 0)
+    actionSuggest:SetScript("OnClick", function(self)
+        self:SetText("Thinking...")
+        AFRequestSuggestions("actions")
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Requesting fresh AI tactical action suggestion...")
+    end)
+
+    local actionSummaryText = actionsPanel:CreateFontString("AzerothFriendActionSummaryText", "OVERLAY", "GameFontHighlightSmall")
+    actionSummaryText:SetPoint("TOPLEFT", actionEdit, "BOTTOMLEFT", -4, -4)
+    actionSummaryText:SetJustifyH("LEFT")
+    actionSummaryText:SetWidth(520)
+    actionSummaryText:SetText(COLORS.MUTED .. "Click 'Suggest' to get fresh AI recommended actions." .. COLORS.RESET)
+
     local goalStatusText = actionsPanel:CreateFontString("AzerothFriendGoalStatusText", "OVERLAY", "GameFontHighlightSmall")
-    goalStatusText:SetPoint("TOPLEFT", shortEdit, "BOTTOMLEFT", -4, -12)
+    goalStatusText:SetPoint("TOPLEFT", actionSummaryText, "BOTTOMLEFT", 0, -8)
     goalStatusText:SetJustifyH("LEFT")
     goalStatusText:SetWidth(520)
     goalStatusText:SetText(COLORS.MUTED .. "Awaiting goal telemetry..." .. COLORS.RESET)
@@ -2368,7 +2654,7 @@ local function InitializeMasterFrame()
     -- Thinking Cadence Switch (Zero Tokens)
     if AzerothFriendBtnThinking then
         AzerothFriendBtnThinking:SetScript("OnClick", function(self)
-            local current = BotCache.thinkingCadence or "normal"
+            local current = BotCache.thinkingCadence or "low"
             local nextTier = "normal"
             if current == "low" then
                 nextTier = "normal"
@@ -2392,7 +2678,7 @@ local function InitializeMasterFrame()
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:AddLine("Thinking Cadence (Zero Tokens)", 1, 0.82, 0)
             GameTooltip:AddLine("Click: Cycle thinking cadence (Low -> Normal -> High)", 1, 1, 1)
-            local current = (BotCache.thinkingCadence or "normal"):upper()
+            local current = (BotCache.thinkingCadence or "low"):upper()
             local interval = current == "LOW" and "20s" or (current == "HIGH" and "4s" or "10s")
             GameTooltip:AddLine("Current Tier: " .. current .. " (" .. interval .. ")", 0.7, 0.9, 1)
             GameTooltip:AddLine("Controls idle background thought updates when no world events occur.", 0.7, 0.7, 0.7)
@@ -2405,15 +2691,19 @@ local function InitializeMasterFrame()
     if AzerothFriendBtnModeCombat then
         AzerothFriendBtnModeCombat:SetScript("OnClick", function()
             SendChatMessage(".af mode " .. (BotCache.name or "") .. " combat")
+            SendChatMessage(".af action follow")
+            if BotCache.name and BotCache.name ~= "" then
+                SendChatMessage("follow", "WHISPER", nil, BotCache.name)
+            end
             BotCache.actionMode = "combat"
-            print(COLORS.ALERT .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. COLORS.ALERT .. "COMBAT" .. COLORS.RESET .. " (+grind, +combat, +loot).")
+            print(COLORS.ALERT .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. COLORS.ALERT .. "COMBAT" .. COLORS.RESET .. " (+follow, +grind, +combat, +loot).")
             RefreshMasterTab()
         end)
         AzerothFriendBtnModeCombat:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:AddLine("Combat Action Mode (0 Tokens)", 1, 0.3, 0.3)
-            GameTooltip:AddLine("Engages aggressive stance: +grind, +combat, +loot.", 1, 1, 1)
-            GameTooltip:AddLine("Bot prioritizes combat, assists master, and clears nearby hostiles.", 0.7, 0.7, 0.7)
+            GameTooltip:AddLine("Engages aggressive stance: +follow, +grind, +combat, +loot.", 1, 1, 1)
+            GameTooltip:AddLine("Bot follows master, assists on pull, and clears nearby hostiles.", 0.7, 0.7, 0.7)
             GameTooltip:Show()
         end)
         AzerothFriendBtnModeCombat:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2806,6 +3096,11 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
             if s.showMinimap then AzerothFriendMinimapButton:Show() else AzerothFriendMinimapButton:Hide() end
         end
         print(COLORS.HEADER .. "AzerothFriend UI: " .. COLORS.RESET .. "Minimap button " .. (s.showMinimap and COLORS.SUCCESS .. "enabled" or COLORS.MUTED .. "disabled") .. COLORS.RESET)
+    elseif cmd:find("^suggest") or cmd:find("^generate") then
+        local scope = cmd:gsub("^suggest%s*", ""):gsub("^generate%s*", "")
+        if scope == "" then scope = "both" end
+        AFRequestSuggestions(scope)
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Requesting fresh AI suggestions (" .. scope .. ")...")
     elseif cmd:find("^action%s*") or cmd:find("^act%s*") then
         local subAction = cmd:gsub("^actions?%s*", ""):gsub("^act%s*", "")
         if subAction == "" or subAction == "help" then
@@ -2819,6 +3114,16 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
             end
             print(COLORS.SUCCESS .. "AzerothFriend: Sent action command '" .. subAction .. "' to " .. (BotCache.name or "companion") .. "." .. COLORS.RESET)
         end
+    elseif cmd:find("^grind") or cmd:find("^hunt") or cmd:find("^roam") or cmd:find("^wander") then
+        local rawParam = cmd:gsub("^grind%s*", ""):gsub("^hunt%s*", ""):gsub("^roam%s*", ""):gsub("^wander%s*", ""):lower():match("^%s*(.-)%s*$")
+        local radius = tonumber(rawParam:match("(%d+)")) or 60
+        if radius < 10 then radius = 10 end
+        if radius > 100 then radius = 100 end
+        SendChatMessage(".af action grind_nearby {\"radius\":" .. radius .. "}")
+        if BotCache.name and BotCache.name ~= "" then
+            SendChatMessage("grind nearby " .. radius, "WHISPER", nil, BotCache.name)
+        end
+        print(COLORS.ALERT .. "AzerothFriend: " .. COLORS.RESET .. "Grind & roam nearby initiated (Radius: " .. radius .. "y, Leash: 90y max).")
     elseif cmd == "attack" then
         SendChatMessage(".af action attack")
         SendChatMessage("attack", "WHISPER", nil, BotCache.name)
@@ -2874,16 +3179,28 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
         local targetMode = cmd:gsub("^mode%s*", ""):lower():match("^%s*(.-)%s*$")
         if targetMode ~= "" then
             SendChatMessage(".af mode " .. (BotCache.name or "") .. " " .. targetMode)
+            if targetMode == "combat" then
+                SendChatMessage(".af action follow")
+                if BotCache.name and BotCache.name ~= "" then
+                    SendChatMessage("follow", "WHISPER", nil, BotCache.name)
+                end
+            end
             BotCache.actionMode = targetMode
-            print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. targetMode:upper() .. " for " .. (BotCache.name or "companion") .. ".")
+            print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. targetMode:upper() .. (targetMode == "combat" and " (+follow, +grind, +combat, +loot)" or "") .. " for " .. (BotCache.name or "companion") .. ".")
             RefreshMasterTab()
         else
             print(COLORS.HEADER .. "Usage: /af mode <combat|travel|idle|social>" .. COLORS.RESET)
         end
     elseif cmd == "combat" or cmd == "travel" or cmd == "idle" or cmd == "social" then
         SendChatMessage(".af mode " .. (BotCache.name or "") .. " " .. cmd)
+        if cmd == "combat" then
+            SendChatMessage(".af action follow")
+            if BotCache.name and BotCache.name ~= "" then
+                SendChatMessage("follow", "WHISPER", nil, BotCache.name)
+            end
+        end
         BotCache.actionMode = cmd
-        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. cmd:upper() .. " for " .. (BotCache.name or "companion") .. ".")
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. cmd:upper() .. (cmd == "combat" and " (+follow, +grind, +combat, +loot)" or "") .. " for " .. (BotCache.name or "companion") .. ".")
         RefreshMasterTab()
     elseif cmd == "claim" then
         SendChatMessage(".af claim " .. (BotCache.name or ""))

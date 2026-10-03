@@ -56,6 +56,7 @@ class CognitivePlanner:
         # False = mod-llm-chatter owns every spoken line (AzerothFriend.Chat.DelegateAmbientToLLMChatter = 1).
         self.companion_speech_allowed = bool(companion_speech_allowed)
         self._last_plan_time: Dict[int, float] = {}
+        self._last_downtime_time: Dict[int, float] = {}
         self._sticky_targets: Dict[int, Dict[str, Any]] = {}
 
     def _fallback_catalog_text(self, authority: str = "autonomous") -> str:
@@ -101,6 +102,12 @@ class CognitivePlanner:
 
         # Downtime Handling: Zero-token deterministic downtime actions (tavern_rest / campfire_cook)
         if event_type == "owner_idle_downtime":
+            last_downtime = self._last_downtime_time.get(bot_guid, 0.0)
+            if now - last_downtime < 300.0:
+                logger.debug("Bot %d downtime routine debounced (%.1fs < 300s)", bot_guid, now - last_downtime)
+                return None, "", None, {}
+            self._last_downtime_time[bot_guid] = now
+
             payload_raw = event.get("payload_json") or "{}"
             try:
                 import json
@@ -512,9 +519,14 @@ class CognitivePlanner:
             import json
             raw_env = state.get("environment_json") or "{}"
             env_obj = json.loads(raw_env) if isinstance(raw_env, str) else raw_env
-            nearby = env_obj.get("nearby") or []
+            if isinstance(env_obj, dict):
+                nearby = env_obj.get("nearby") or []
         except Exception:
             nearby = []
+        if not nearby and isinstance(state.get("environment"), dict):
+            nearby = state["environment"].get("nearby") or []
+        if not nearby and isinstance(state.get("nearby"), list):
+            nearby = state.get("nearby") or []
 
         def find_entity(reference: Any) -> Optional[Dict[str, Any]]:
             if reference is None:
@@ -531,9 +543,51 @@ class CognitivePlanner:
                 for ent in nearby:
                     if int(ent.get("guid", 0)) == int(text):
                         return ent
+
+            import re
+            clean_text = re.sub(
+                r"^(?:the|a|an|nearby|near\s+by|that|this|target|mob|enemy|creature)\s+",
+                "",
+                text,
+            ).strip()
+            if not clean_text:
+                clean_text = text
+
+            # 1. Exact match (case-insensitive)
             for ent in nearby:
-                if text in str(ent.get("name", "")).lower():
+                ent_name = str(ent.get("name", "")).strip().lower()
+                if ent_name and (clean_text == ent_name or text == ent_name):
                     return ent
+
+            # 2. Substring match (clean_text in ent_name)
+            matches = []
+            for ent in nearby:
+                ent_name = str(ent.get("name", "")).strip().lower()
+                if ent_name and clean_text in ent_name:
+                    matches.append(ent)
+            if matches:
+                matches.sort(key=lambda x: float(x.get("distance", 999.0)))
+                return matches[0]
+
+            # 3. Reverse substring match (ent_name in clean_text)
+            for ent in nearby:
+                ent_name = str(ent.get("name", "")).strip().lower()
+                if ent_name and len(ent_name) >= 3 and ent_name in clean_text:
+                    matches.append(ent)
+            if matches:
+                matches.sort(key=lambda x: float(x.get("distance", 999.0)))
+                return matches[0]
+
+            # 4. Token overlap match
+            tokens = set(clean_text.split())
+            for ent in nearby:
+                ent_tokens = set(str(ent.get("name", "")).strip().lower().split())
+                if tokens and tokens.issubset(ent_tokens):
+                    matches.append(ent)
+            if matches:
+                matches.sort(key=lambda x: float(x.get("distance", 999.0)))
+                return matches[0]
+
             return None
 
         resolved: List[Any] = []

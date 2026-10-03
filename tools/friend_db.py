@@ -215,6 +215,10 @@ class DatabaseManager:
             )
             return cur.fetchone()
 
+    # Compatibility aliases for RPC and external controllers
+    fetch_bot_info = fetch_control_state
+    fetch_all_controlled_bots = fetch_registered_bots
+
     def fetch_control_states(self, bot_guids: List[int]) -> Dict[int, Dict[str, Any]]:
         """Batched control lookup for the registered companion set."""
         if not bot_guids:

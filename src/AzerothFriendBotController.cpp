@@ -353,21 +353,12 @@ namespace AzerothFriendBotController
         if (!bot || !bot->IsInWorld() || message.empty())
             return false;
 
-        // In-game speech normally belongs to mod-llm-chatter. The fallback exists so
-        // a companion can still answer when chatter is absent or disabled.
-        if (!sAzerothFriendConfig->sayFallback)
-        {
-            if (sAzerothFriendConfig->debug)
-            {
-                LOG_DEBUG("server.loading",
-                          "[AzerothFriend] Speech delegated to mod-llm-chatter (SayFallback disabled) for '{}'",
-                          bot->GetName());
-            }
-            return false;
-        }
+        if (channel == "yell")
+            bot->Yell(message, LANG_UNIVERSAL);
+        else
+            bot->Say(message, LANG_UNIVERSAL);
 
-        (void)channel;
-        return AzerothFriendPlayerbotActions::DoAction(bot, "say", message);
+        return true;
     }
 
     bool Follow(Player* bot, Player* master)

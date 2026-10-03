@@ -319,6 +319,14 @@ AzerothFriend.Autonomous.AutoEquipUpgrades = 1
 #
 AzerothFriend.Autonomous.DowntimeInns = 1
 
+#
+#   AzerothFriend.Autonomous.DowntimeCooldown
+#       Minimum cooldown in seconds between stationary idle downtime routines
+#       (such as tavern_rest or campfire_cook). Prevents repetitive campfire placement.
+#       Default: 300 (5 minutes)
+#
+AzerothFriend.Autonomous.DowntimeCooldown = 300
+
 ###############################################################################
 # MINDSET LATENCY & COGNITIVE INERTIA (PREVENTING AI ADHD)
 ###############################################################################
@@ -623,9 +631,9 @@ AzerothFriend.BotApi.MaxPromptCapabilities = 90
 #       All spoken dialogue normally belongs to mod-llm-chatter. Enable this to let
 #       the companion speak its own "say" action steps when mod-llm-chatter is
 #       absent or disabled, so dialogue-driven plans stay visible to the player.
-#       Default: 0 (disabled - mod-llm-chatter owns all speech)
+#       Default: 1 (enabled so action plan speech succeeds cleanly)
 #
-AzerothFriend.Chat.SayFallback = 0
+AzerothFriend.Chat.SayFallback = 1
 
 #
 #   AzerothFriend.Chat.SayFallbackChannel
@@ -658,9 +666,9 @@ AzerothFriend.Autonomy.TickSeconds = 5
 #   AzerothFriend.Autonomy.ThinkingCadence
 #       Idle thought generation cadence tier: "low" (20s), "normal" (10s), "high" (4s).
 #       Controls how often idle background thoughts are updated when no nearby event drags it.
-#       Default: "normal"
+#       Default: "low"
 #
-AzerothFriend.Autonomy.ThinkingCadence = "normal"
+AzerothFriend.Autonomy.ThinkingCadence = "low"
 
 #
 #   AzerothFriend.Autonomy.Modes
@@ -908,3 +916,61 @@ AzerothFriend.Chatter.FreshnessSeconds = 90
 #       Default: 3
 #
 AzerothFriend.Rollout.Stage = 3
+
+###############################################################################
+# JSON-RPC 2.0 GATEWAY & MODULAR PLUGINS (Decoupled Python Bridge)
+###############################################################################
+
+#
+#   AzerothFriend.Rpc.Enable
+#       Enable the loopback JSON-RPC 2.0 server in the Python bridge for external CLI tools,
+#       health checks, inspection, and remote control.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Rpc.Enable = 1
+
+#
+#   AzerothFriend.Rpc.Host
+#       Loopback IP address for the JSON-RPC HTTP server.
+#       Default: "127.0.0.1"
+#
+AzerothFriend.Rpc.Host = "127.0.0.1"
+
+#
+#   AzerothFriend.Rpc.Port
+#       TCP port for the bridge JSON-RPC server (e.g. for tools/af_ctl.py).
+#       Default: 8378
+#
+AzerothFriend.Rpc.Port = 8378
+
+#
+#   AzerothFriend.Plugins.Enable
+#       Enable dynamic loading of modular plugins located in `tools/plugins/`.
+#       Default: 1 (enabled)
+#
+AzerothFriend.Plugins.Enable = 1
+
+###############################################################################
+# AMBIENT NEARBY MOB GRINDING & ROAMING
+###############################################################################
+
+#
+#    AzerothFriend.Grind.SearchRadiusYards
+#        Description: Default search and roaming radius (in yards) around the master
+#                     when looking for nearby mobs or executing ambient grind actions.
+#                     The bot roams paths within this bubble and engages hostile targets.
+#        Default:     60.0
+#        Range:       10.0 - 100.0
+#
+AzerothFriend.Grind.SearchRadiusYards = 60.0
+
+#
+#    AzerothFriend.Grind.MaxLeashRadiusYards
+#        Description: Hard maximum leash distance (in yards) from the master. If a mob
+#                     pursuit or roaming path exceeds this distance, the bot disengages
+#                     and immediately returns to follow the master.
+#        Default:     90.0
+#        Range:       20.0 - 150.0
+#
+AzerothFriend.Grind.MaxLeashRadiusYards = 90.0
+

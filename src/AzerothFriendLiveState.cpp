@@ -982,6 +982,14 @@ namespace AzerothFriend
         return it == _thoughts.end() ? std::string() : it->second;
     }
 
+    void LiveStateService::SetThought(uint32 botGuid, std::string const& thought)
+    {
+        if (!botGuid)
+            return;
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        _thoughts[botGuid] = thought;
+    }
+
     void LiveStateService::RefreshHistoryAsync(uint32 botGuid)
     {
         if (!botGuid)

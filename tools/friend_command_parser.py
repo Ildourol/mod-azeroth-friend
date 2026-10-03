@@ -283,6 +283,21 @@ def parse_cast_command(
     if not lowered:
         return None, None
 
+    if words[0] in ("buff", "buffs"):
+        if lowered in ("me", "us", "party", "team", "master", "group", "everyone", "all"):
+            buff_target = _canonical_target(lowered) or "master"
+            for buff_name in (
+                "Arcane Intellect", "Arcane Brilliance",
+                "Power Word: Fortitude", "Prayer of Fortitude",
+                "Mark of the Wild", "Gift of the Wild",
+                "Blessing of Kings", "Greater Blessing of Kings",
+                "Blessing of Might", "Greater Blessing of Might",
+            ):
+                info = _resolve(resolver, buff_name, bot_guid, None)
+                if info:
+                    return _cast_step(info, buff_name, buff_target), None
+            return {"action": "playerbot_command", "params": {"command": "buff"}}, None
+
     rank = None
     rank_match = _RANK_RE.search(lowered)
     if rank_match:
@@ -411,7 +426,8 @@ def parse_trade_intent(raw: str, speaker: Optional[str] = None, is_trade_active:
     if lowered in ("what do you have", "what do you have?", "what have you got", "what's in your bags", "whats in your bags"):
         return {"action": "trade_link_items", "params": {"category": "all"}}
 
-    # 3. Gold adjustment in trade
+    # 3. Gold / Silver / Copper currency adjustment in trade
+    # Pattern 3A: Explicit prefix "adjust/set/put/offer/change/trade/give ... gold/money to ..."
     gold_set_match = re.match(
         r'^(?:(?:adjust|set|put|offer|change|trade|give)(?:\s+(?:the|me))?\s+)?(?:trade\s+)?(?:gold|money)\s+(?:to\s+)?(\d+.*)$',
         lowered
@@ -423,31 +439,32 @@ def parse_trade_intent(raw: str, speaker: Optional[str] = None, is_trade_active:
         val = re.sub(r'(\d+)\s*copper\b', r'\1c', val)
         return {"action": "trade_set_gold", "params": {"gold": val}}
 
-    # Pattern 3B: "trade me 5 gold", "give me 5 gold", "put 5 gold", "trade 5 gold", "offer 5g", "5 gold"
-    money_words_match = re.match(
-        r'^(?:(?:adjust|set|put|offer|change|trade|give)(?:\s+(?:the|me))?\s+)?(\d+)\s*(?:gold|g)(?:\s*(\d+)\s*(?:silver|s))?(?:\s*(\d+)\s*(?:copper|c))?(?:\s+in\s+trade)?$',
-        lowered
-    )
-    if money_words_match and (is_trade_active or lowered.startswith(("adjust", "set", "put", "offer", "trade", "give")) or "in trade" in lowered or "gold" in lowered):
-        g = money_words_match.group(1)
-        s = money_words_match.group(2)
-        c = money_words_match.group(3)
-        formatted = f"{g}g"
-        if s:
-            formatted += f" {s}s"
-        if c:
-            formatted += f" {c}c"
-        return {"action": "trade_set_gold", "params": {"gold": formatted}}
+    # Pattern 3B: Natural language currency expressions:
+    # "trade me 1 silver", "give me 50 copper", "trade 10s", "1 silver in trade", "put 20 silver in trade",
+    # "5 gold", "5g", "50 copper" (when in trade), "1s 50c", "trade me 1 silver and 50 copper", "put 5g 20s in trade"
+    has_verb = bool(re.match(r'^(?:adjust|set|put|offer|change|trade|give|add)\b', lowered))
+    has_trade_marker = 'in trade' in lowered or 'trade' in lowered
 
-    # Standalone money expression: e.g. "5g", "5g 20s", "10g 50s 25c", "put 5g", "put 5g in trade", "give me 5g"
-    pure_money_match = re.match(
-        r'^(?:(?:put|offer|trade|give)(?:\s+me)?\s+)?(\d+\s*g(?:\s*\d+\s*s)?(?:\s*\d+\s*c)?)(?:\s+in\s+trade)?$',
-        lowered
-    )
-    if pure_money_match:
-        val = pure_money_match.group(1).strip()
-        if is_trade_active or lowered.startswith(("put ", "offer ", "trade ", "give ")) or "in trade" in lowered:
-            return {"action": "trade_set_gold", "params": {"gold": val}}
+    core = re.sub(r'^(?:(?:adjust|set|put|offer|change|trade|give|add)(?:\s+(?:the|me))?\s+)?(?:trade\s+)?(?:gold|money)?(?:\s+to)?\s*', '', lowered)
+    core = re.sub(r'\s+in\s+trade$', '', core).strip()
+
+    tokens = re.findall(r'(\d+)\s*(gold\b|silver\b|copper\b|g\b|s\b|c\b)', core)
+    remainder = re.sub(r'(\d+)\s*(gold\b|silver\b|copper\b|g\b|s\b|c\b)', '', core)
+    remainder = re.sub(r'[\s,]|and', '', remainder)
+    if tokens and not remainder:
+        if is_trade_active or has_verb or has_trade_marker or 'gold' in lowered or 'silver' in lowered or 'copper' in lowered:
+            g, s, c = 0, 0, 0
+            for val_str, unit in tokens:
+                val = int(val_str)
+                if unit in ('gold', 'g'): g += val
+                elif unit in ('silver', 's'): s += val
+                elif unit in ('copper', 'c'): c += val
+            parts = []
+            if g > 0: parts.append(f'{g}g')
+            if s > 0: parts.append(f'{s}s')
+            if c > 0: parts.append(f'{c}c')
+            if parts:
+                return {"action": "trade_set_gold", "params": {"gold": ' '.join(parts)}}
 
     # 4. Clear item from trade
     clear_match = re.match(r'^(?:remove|clear|take\s+back|take\s+off)\s+(?:item\s+)?(?:slot\s+)?(\d+)$', lowered)
@@ -551,8 +568,39 @@ def parse_slash_intent(raw: str, speaker: Optional[str] = None, is_trade_active:
         elif m == "rpg": m = "social"
         return {"action": "set_action_mode", "params": {"mode": m}}
 
+    # Ambient Nearby Mob Grinding & Roaming intent (MAF-071)
+    # Direct grind commands: "grind", "grind nearby", "grind 25", "grind nearby 30", "roam nearby", "roam around"
+    grind_direct = re.match(r'^(?:grind|roam|hunt|wander)(?:\s+(?:nearby|around(?:\s+here)?))?(?:\s+(?:within\s+)?(\d+(?:\.\d+)?)(?:\s*(?:yards?|yd|y))?)?$', cleaned)
+    if grind_direct:
+        radius = 60.0
+        if grind_direct.group(1):
+            try:
+                r_val = float(grind_direct.group(1))
+                radius = max(10.0, min(100.0, r_val))
+            except Exception:
+                radius = 60.0
+        return {"action": "grind_nearby", "params": {"radius": radius, "max_radius": 90.0}}
+
+    # Natural language queries: "start looking nearby mobs", "hunt some creatures around here", "look for mobs nearby"
+    grind_nl = re.compile(
+        r'\b(?:start\s+looking(?:\s+for)?|look\s+for|search(?:\s+for)?|hunt(?:\s+for)?|find|grind|clear)\b'
+        r'.*?\b(?:mobs|enemies|creatures|monsters|threats|beasts|targets|nearby|around\s+here)\b',
+        re.I
+    )
+    if grind_nl.search(cleaned):
+        radius = 60.0
+        rad_match = re.search(r'\b(?:within|radius)?\s*(\d+(?:\.\d+)?)\s*(?:yards?|yd|y)?\b', cleaned)
+        if rad_match:
+            try:
+                r_val = float(rad_match.group(1))
+                if 1.0 <= r_val <= 150.0:
+                    radius = max(10.0, min(100.0, r_val))
+            except Exception:
+                pass
+        return {"action": "grind_nearby", "params": {"radius": radius, "max_radius": 90.0}}
+
     # Trade intent
-    if cleaned in ("trade", "trade with me", "open trade", "let's trade", "lets trade", "tr"):
+    if cleaned in ("trade", "trade me", "trade with me", "open trade", "let's trade", "lets trade", "tr"):
         return {"action": "trade", "params": {"target": speaker or "master"}}
     trade_match = re.match(r'^(?:trade|open trade|trade with)\s+([a-zA-Z0-9_\-]+)$', cleaned)
     if trade_match:
@@ -670,7 +718,13 @@ def match_bag_item_request(
     if not lowered:
         return None
 
-    if lowered in ("gold", "money", "follow", "stay", "stop", "attack", "flee", "loot", "accept", "cancel", "deal", "yes", "no"):
+    STOP_WORDS = {
+        "gold", "money", "follow", "stay", "stop", "attack", "flee", "loot",
+        "accept", "cancel", "deal", "yes", "no", "me", "you", "us", "master",
+        "target", "him", "her", "them", "trade", "with me", "it", "this", "that",
+        "all", "anything", "something"
+    }
+    if lowered in STOP_WORDS:
         return None
     if re.search(r'^\d+\s*(?:gold|silver|copper|g|s|c)', lowered):
         return None
@@ -679,9 +733,10 @@ def match_bag_item_request(
         if it.get("name", "").lower() == lowered:
             return it, min(count, int(it.get("count", 1)))
 
-    for it in inventory:
-        if lowered in it.get("name", "").lower():
-            return it, min(count, int(it.get("count", 1)))
+    if len(lowered) >= 3:
+        for it in inventory:
+            if lowered in it.get("name", "").lower():
+                return it, min(count, int(it.get("count", 1)))
 
     query_words = set(lowered.split())
     if len(query_words) > 1:

@@ -41,6 +41,7 @@ struct BotActiveAction
     uint8 attempts = 0;
     bool handedOff = false;   // long-lived mode action (follow/grind/...) took over
     bool verified = false;    // true only when a postcondition was observed
+    std::string authority = "autonomous";
 };
 
 // One queue row claimed asynchronously from azeroth_friend_actions. Holds values

@@ -79,7 +79,7 @@ namespace AzerothFriendAiControl
             if (mode == "combat" || mode == "grind")
             {
                 ai->ClearStrategies(BOT_STATE_NON_COMBAT);
-                ai->ChangeStrategy("+grind,+loot,+gather", BOT_STATE_NON_COMBAT);
+                ai->ChangeStrategy("+follow,+grind,+loot,+gather,-stay", BOT_STATE_NON_COMBAT);
                 ai->SelectiveResetStrategies(BOT_STATE_COMBAT);
                 return;
             }
@@ -426,6 +426,7 @@ namespace AzerothFriendAiControl
             float lastX = 0.0f;
             float lastY = 0.0f;
             time_t stationarySince = 0;
+            time_t lastRoutineTrigger = 0;
         };
 
         std::unordered_map<uint32, MasterIdleState> _masterIdleStates;
@@ -475,12 +476,22 @@ namespace AzerothFriendAiControl
             if (now - state.stationarySince < 30)
                 return 0;
 
+            // Enforce cooldown between downtime triggers (300 seconds / 5 minutes)
+            if (state.lastRoutineTrigger != 0 && (now - state.lastRoutineTrigger < 300))
+                return 0;
+
             // 1 = Inn/City rest (tavern), 2 = Wilderness campfire
             if (master->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_RESTING))
+            {
+                state.lastRoutineTrigger = now;
                 return 1;
+            }
 
             if (now - state.stationarySince >= 45)
+            {
+                state.lastRoutineTrigger = now;
                 return 2;
+            }
         }
 #endif
         return 0;

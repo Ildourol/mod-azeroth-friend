@@ -128,7 +128,7 @@ namespace AzerothFriendActionRegistry
         std::string CompletionFor(std::string const& name)
         {
             static std::set<std::string> const handoffs = {
-                "follow", "grind", "wander", "travel_to", "taxi", "rpg_do_quest", "runaway",
+                "follow", "grind", "grind_nearby", "roam_nearby", "wander", "travel_to", "taxi", "rpg_do_quest", "runaway",
                 "set_action_mode"
             };
             static std::set<std::string> const observed = {
@@ -184,6 +184,8 @@ namespace AzerothFriendActionRegistry
                 { "flee",                "movement", "",                     "Flee from the current attacker.", "flee", false },
                 { "runaway",             "movement", "",                     "Kite mob away from danger.", "runaway", false },
                 { "grind",               "movement", "",                     "Hunt nearby hostile mobs autonomously (hand behaviour back to playerbots).", "grind", false },
+                { "grind_nearby",        "movement", "[radius]",             "Hunt nearby hostile mobs and roam proximate paths within radius.", "grind", false },
+                { "roam_nearby",         "movement", "[radius]",             "Roam proximate paths around master exploring for mobs.", "grind", false },
                 { "wander",              "movement", "",                     "Random idle roam around the current spot.", "move random", false },
                 { "travel_to",           "movement", "destination",          "Use playerbots travel to a named destination.", "go", false },
                 { "summon",              "movement", "",                     "Summon bot to master's position.", "summon", false },

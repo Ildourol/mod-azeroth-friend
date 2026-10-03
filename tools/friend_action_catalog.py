@@ -23,6 +23,8 @@ CATALOG: Dict[str, Tuple[str, str, str, bool]] = {
     "flee": ("movement", "", "Flee from the current attacker.", False),
     "runaway": ("movement", "", "Kite mob away from danger.", False),
     "grind": ("movement", "", "Hunt nearby hostile mobs autonomously.", False),
+    "grind_nearby": ("movement", "[radius]", "Hunt nearby hostile mobs and roam proximate paths within radius.", False),
+    "roam_nearby": ("movement", "[radius]", "Roam proximate paths around master exploring for mobs.", False),
     "wander": ("movement", "", "Random idle roam around the current spot.", False),
     "travel_to": ("movement", "destination", "Use playerbots travel to a named destination.", False),
     "taxi": ("movement", "destination", "Take a known flight path through playerbots.", False),
@@ -243,7 +245,7 @@ PSEUDO_PLAYERBOT_ACTIONS = {
 COMMAND_INDEX: Dict[str, List[str]] = {
     "movement": [
         "move_to", "go_to", "follow", "stay", "stop", "mount", "dismount", "flee",
-        "runaway", "grind", "wander", "travel_to", "taxi", "summon", "disperse", "disperse_disable",
+        "runaway", "grind", "grind_nearby", "roam_nearby", "wander", "travel_to", "taxi", "summon", "disperse", "disperse_disable",
     ],
     "combat": [
         "attack", "attack_my_target", "assist", "aoe", "pull", "pull_back",
@@ -590,6 +592,13 @@ def validate_step(step: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optio
         dist = _as_int(params.get("distance", params.get("x", 10))) or 10
         params["distance"] = max(1, min(100, dist))
 
+    elif name in ("grind_nearby", "roam_nearby", "wander"):
+        r = _as_float(params.get("radius", params.get("distance")))
+        if r is not None:
+            params["radius"] = max(10.0, min(100.0, r))
+        else:
+            params["radius"] = 60.0
+
     # -------------------------------------------------------------------- Combat
     elif name == "attack":
         guid = require_int("guid")
@@ -933,7 +942,7 @@ def normalize_plan(plan: Any, max_steps: int = 5, authority: str = "gm_manual",
     if not isinstance(plan, list):
         return steps, ["plan is not a list"]
 
-    HANDOFF_ACTIONS = {"follow", "grind", "wander", "travel_to", "taxi", "rpg_do_quest", "runaway", "set_action_mode"}
+    HANDOFF_ACTIONS = {"follow", "grind", "grind_nearby", "roam_nearby", "wander", "travel_to", "taxi", "rpg_do_quest", "runaway", "set_action_mode"}
 
     for raw in plan:
         if len(steps) >= max_steps:
