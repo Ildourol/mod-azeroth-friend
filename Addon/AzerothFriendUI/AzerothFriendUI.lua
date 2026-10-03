@@ -16,6 +16,13 @@ end
 
 local AFThinking = { actions = 0, both = 0, short = 0, long = 0 }
 
+-- Forward declaration. AFRequestSuggestions is defined before the BotCache table
+-- literal further down this file. Without an in-scope binding here, Lua compiles
+-- `BotCache.name` as a global lookup (nil in game) and the function raises before
+-- the `.af suggest` command is ever sent to the server, which is exactly why every
+-- Suggest button appeared to do nothing.
+local BotCache
+
 function AFRequestSuggestions(scope)
     scope = (scope and scope ~= "") and scope:lower() or "both"
     if scope == "action" then scope = "actions" end
@@ -81,8 +88,9 @@ local DEFAULT_SETTINGS = {
     frames = {}
 }
 
--- Live Companion Bot Cache
-local BotCache = {
+-- Live Companion Bot Cache. Assigned to the forward-declared local at the top of
+-- the file so AFRequestSuggestions and every other helper share one binding.
+BotCache = {
     name = "Friendbot",
     race = "Orc",
     class = "Rogue",
@@ -1415,7 +1423,11 @@ local function ProcessMessage(msg)
         if decoded then ProcessMessage(decoded) end
         return true
     end
-    if AFProcessExtension and AFProcessExtension(msg) then
+    -- FRIEND_GOAL frames belong to the dedicated handler below: it clears the Suggest
+    -- thinking locks, mirrors the payload into BotCache, and calls AFProcessExtension
+    -- itself for the goal panel. Letting the extension consume the frame here made that
+    -- handler unreachable, so a delivered suggestion never unlocked the Suggest button.
+    if AFProcessExtension and not msg:match("^%[FRIEND_GOAL%]") and AFProcessExtension(msg) then
         -- Goal/autonomy telemetry also drives the HUD switch, so repaint the master frame.
         RefreshMasterTab()
         return true

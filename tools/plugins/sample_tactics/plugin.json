@@ -1,0 +1,8 @@
+{
+  "name": "sample_tactics",
+  "version": "1.0.0",
+  "description": "Demonstration plugin providing tactical evaluation and custom RPC methods",
+  "entrypoint": "plugin.py",
+  "author": "AzerothFriend Team",
+  "dependencies": []
+}

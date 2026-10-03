@@ -550,6 +550,116 @@ def get_known_hardcoded_goals() -> set:
     return res
 
 
+# Suggested actions are echoed into the client HUD and dispatched through
+# `.af action`, which splits the string on commas and maps each clause onto a
+# native playerbot command. Prose clauses ("use defensive cooldowns",
+# "attack nearest hostile threat") are rejected there, so a recommendation the
+# body cannot execute is noise. Ground every suggestion onto that verb set
+# before it reaches the owner.
+# Every verb here either has an explicit branch in AzerothFriendCommand.cpp's
+# HandleAction (follow, stay/stop/hold, eat_drink/rest, attack, loot/loot_all,
+# flee, grind/grind_nearby/roam_nearby/roam/wander) or resolves to a real
+# mod-playerbots chat trigger (attack, follow, stay, grind, flee, cast).
+# Bare "assist" is deliberately absent: this playerbot fork has no "assist"
+# chat trigger, so it is rewritten to grind_nearby instead.
+_EXECUTABLE_ACTION_VERBS = {
+    "attack", "follow", "stay", "stop", "hold", "loot", "loot_all",
+    "flee", "grind", "grind_nearby", "roam_nearby", "roam", "wander",
+    "eat_drink", "rest", "cast",
+}
+
+# Prose targets the LLM invents ("nearest hostile threat"). They are not entity
+# names, so the clause is rewritten to a command the dispatcher can actually run.
+_PLACEHOLDER_TARGETS = {
+    "target", "targets", "nearest", "nearby", "hostile", "hostiles", "enemy",
+    "enemies", "threat", "threats", "foe", "foes", "mob", "mobs", "creature",
+    "creatures", "master", "master's", "masters", "current", "the", "a", "an",
+    "any", "local", "some", "attacker", "attackers", "adds",
+}
+
+# Last-resort pool: only commands HandleAction maps onto curated playerbot
+# behaviour, so a suggestion always survives as something the body can execute.
+_EXECUTABLE_ACTION_POOLS: Dict[str, List[str]] = {
+    "default": ["attack, loot all", "grind_nearby, loot all", "follow, loot all"],
+    "Warrior": ["attack, loot all", "grind_nearby, loot all"],
+    "Paladin": ["attack, loot all", "follow, loot all"],
+    "Hunter": ["attack, loot all", "roam_nearby, loot all"],
+    "Rogue": ["attack, loot all", "follow, loot all"],
+    "Priest": ["follow, loot all", "roam_nearby, loot all"],
+    "Death Knight": ["attack, loot all", "grind_nearby, loot all"],
+    "Shaman": ["attack, loot all", "follow, loot all"],
+    "Mage": ["roam_nearby, loot all", "attack, loot all"],
+    "Warlock": ["attack, loot all", "follow, loot all"],
+    "Druid": ["attack, loot all", "roam_nearby, loot all"],
+}
+
+_TRAILING_CONDITION = re.compile(
+    r"\s+(?:if|when|while|until|unless|then|after|before|once|should)\b.*$", re.I)
+
+# Tokens that mark a phrase as prose rather than a resolvable entity name.
+_TARGET_PROSE_WORDS = _PLACEHOLDER_TARGETS | {
+    "with", "from", "using", "at", "on", "in", "into", "by", "for", "to", "and",
+    "or", "then", "your", "my", "its", "their", "up", "out", "down", "around",
+    "near", "toward", "towards", "before", "after", "if", "when",
+}
+
+
+def _ground_clauses(raw: str) -> List[str]:
+    """Split a candidate into the curated command clauses it legitimately contains."""
+    clauses: List[str] = []
+    seen: Set[str] = set()
+    for chunk in re.split(r"[,;]|\band\b", raw or ""):
+        text = _TRAILING_CONDITION.sub("", " ".join((chunk or "").split())).strip(" .!?;:'\"")
+        if not text:
+            continue
+        tokens = text.split()
+        verb = tokens[0].lower().strip(".!?;:,")
+        rest = tokens[1:]
+
+        if verb in ("attack", "assist"):
+            # Keep a target only when every token reads like an entity name. Prose
+            # targets ("nearest hostile threat", "with ranged shots") are dropped.
+            prose = any(t.lower().strip(".!?;:,['\"]") in _TARGET_PROSE_WORDS for t in rest)
+            target = "" if prose else " ".join(rest).strip(" .!?;:,'\"")
+            if verb == "assist" or (verb == "attack" and not target):
+                # The module's grind_nearby is the executable equivalent: it scans for
+                # the nearest attackable creature in radius and attacks it.
+                clause = "grind_nearby"
+            else:
+                clause = verb if not target else f"{verb} {target}"
+        elif verb == "cast":
+            if not rest:
+                continue
+            clause = "cast " + " ".join(rest)
+        elif verb in _EXECUTABLE_ACTION_VERBS:
+            clause = verb
+        else:
+            continue
+
+        key = clause.lower()
+        if key not in seen:
+            seen.add(key)
+            clauses.append(clause)
+        if len(clauses) >= 3:
+            break
+    return clauses
+
+
+def ground_suggested_actions(raw: str, cls_name: str = "Warrior") -> str:
+    """Reduce a suggested action string to clauses the dispatcher can execute.
+
+    Returns a comma-separated sequence of curated playerbot commands (for example
+    ``grind_nearby, loot``). Falls back to a class-appropriate executable pool when
+    nothing in the candidate survives, so the owner is never handed a recommendation
+    the companion body cannot run.
+    """
+    clauses = _ground_clauses(raw)
+    if not clauses:
+        pool = _EXECUTABLE_ACTION_POOLS.get(cls_name) or _EXECUTABLE_ACTION_POOLS["default"]
+        clauses = _ground_clauses(pool[0]) or ["grind_nearby"]
+    return ", ".join(clauses)
+
+
 def generate_contextual_suggestions(
     bot_info: Dict[str, Any],
     surroundings: Optional[Dict[str, Any]] = None,
@@ -672,6 +782,9 @@ def generate_contextual_suggestions(
                 lt = str(data.get("long_term_goal", "")).strip()
                 act = str(data.get("suggested_actions", "")).strip()
                 act_sum = str(data.get("action_summary", "")).strip()
+                # Only recommend commands the companion body can actually run.
+                if act:
+                    act = ground_suggested_actions(act, cls_name)
 
                 # Ensure non-trivial results
                 if st or lt or act:
@@ -732,6 +845,9 @@ def generate_contextual_suggestions(
         chosen_action = random.choice(act_candidates)
 
     action_summary = f"Engage tactical {cls_name.lower()} routine{loc_suffix[:-1]}."
+    # The fallback pool is written as prose for flavour; reduce it to the curated
+    # command vocabulary before it is offered as a runnable recommendation.
+    chosen_action = ground_suggested_actions(chosen_action, cls_name)
     logger.info("[GOAL] Diverse suggestions selected for %s (Level %d %s): Short='%s', Long='%s', Actions='%s'",
                 bot_name, level, cls_name, short_goal, long_goal, chosen_action)
 
@@ -764,4 +880,3 @@ def generate_contextual_goals(
         state=state,
     )
     return str(res.get("short_term_goal", "")), str(res.get("long_term_goal", ""))
-
