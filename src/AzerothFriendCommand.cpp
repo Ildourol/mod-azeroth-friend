@@ -1188,11 +1188,22 @@ namespace AzerothFriend
                 bool haveControl = sAFLiveState->GetBotControl(bot->GetGUID().GetCounter(), control);
                 if (haveControl && control.currentGoal.empty() && control.longTermGoal.empty())
                 {
-                    if (Player* issuer = handler->GetPlayer())
-                        AzerothFriendShared::SendAddonError(issuer, "Set a short-term or long-term goal before enabling autonomy.", bot->GetName());
+                    std::string generatedShort, generatedLong;
+                    GenerateContextualGoals(bot, "both", generatedShort, generatedLong);
+                    if (!generatedShort.empty() || !generatedLong.empty())
+                    {
+                        assignments += ",current_goal='" + AzerothFriendShared::EscapeSqlString(generatedShort) +
+                                       "',long_term_goal='" + AzerothFriendShared::EscapeSqlString(generatedLong) + "'";
+                        handler->SendSysMessage(("Auto-generated initial companion goals for " + bot->GetName() + ": [" + generatedShort + "]").c_str());
+                    }
                     else
-                        handler->SendSysMessage("Set a short-term or long-term goal before enabling autonomy.");
-                    return;
+                    {
+                        if (Player* issuer = handler->GetPlayer())
+                            AzerothFriendShared::SendAddonError(issuer, "Set a short-term or long-term goal before enabling autonomy.", bot->GetName());
+                        else
+                            handler->SendSysMessage("Set a short-term or long-term goal before enabling autonomy.");
+                        return;
+                    }
                 }
                 if (!haveControl)
                 {
@@ -1443,7 +1454,7 @@ namespace AzerothFriend
                 else if (loweredSubName == "attack")
                 {
                     std::string cmd = subRest.empty() ? "attack" : ("attack " + subRest);
-                    if (AzerothFriendPlayerbotActions::DoCommand(bot, cmd))
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, cmd, self))
                         handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to " + cmd + ".").c_str());
                     else
                         handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the " + cmd + " action.").c_str());
@@ -1451,14 +1462,14 @@ namespace AzerothFriend
                 else if (loweredSubName == "loot" || loweredSubName == "loot_all")
                 {
                     std::string cmd = subRest.empty() ? "loot all" : ("loot " + subRest);
-                    if (AzerothFriendPlayerbotActions::DoCommand(bot, cmd))
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, cmd, self) || AzerothFriendPlayerbotActions::DoAction(bot, "loot"))
                         handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to " + cmd + ".").c_str());
                     else
                         handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the loot action.").c_str());
                 }
                 else if (loweredSubName == "flee")
                 {
-                    if (AzerothFriendPlayerbotActions::DoCommand(bot, "flee"))
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, "flee", self))
                         handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to flee.").c_str());
                     else
                         handler->SendSysMessage(("Companion " + bot->GetName() + " rejected the flee action.").c_str());
@@ -1467,14 +1478,14 @@ namespace AzerothFriend
                 {
                     AzerothFriendAiControl::ApplyMode(bot, "combat");
                     AzerothFriendPlayerbotActions::ChangeStrategies(bot, "+follow,+grind,+combat,+loot", false);
-                    if (AzerothFriendPlayerbotActions::DoCommand(bot, "grind"))
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, "grind", self))
                         handler->SendSysMessage(("Ordered companion " + bot->GetName() + " to roam/grind nearby.").c_str());
                     else
                         handler->SendSysMessage(("Companion " + bot->GetName() + " rejected grind.").c_str());
                 }
                 else
                 {
-                    if (AzerothFriendPlayerbotActions::DoCommand(bot, subAction))
+                    if (AzerothFriendPlayerbotActions::DoCommand(bot, subAction, self))
                     {
                         handler->SendSysMessage(("Ordered companion " + bot->GetName() + ": " + subAction).c_str());
                     }

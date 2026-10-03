@@ -367,11 +367,22 @@ namespace AzerothFriendBotController
             return false;
 
 #if AF_HAS_PLAYERBOTS
-        if (ExecutePlayerbotCommand(bot, "follow"))
+        if (master && master->GetSession())
+        {
+            PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
+            if (ai && ai->GetMaster() != master)
+                ai->SetMaster(master);
+        }
+
+        if (AzerothFriendPlayerbotActions::FollowMaster(bot))
             return true;
+
+        if (ExecutePlayerbotCommand(bot, "follow", master))
+            return true;
+#else
+        (void)master;
 #endif
 
-        (void)master;
         return false;
     }
 
@@ -381,6 +392,9 @@ namespace AzerothFriendBotController
             return false;
 
 #if AF_HAS_PLAYERBOTS
+        if (AzerothFriendPlayerbotActions::StopMovement(bot))
+            return true;
+
         if (ExecutePlayerbotCommand(bot, "stay"))
             return true;
 #endif
@@ -954,14 +968,19 @@ namespace AzerothFriendBotController
         return false;
     }
 
-    bool ExecutePlayerbotCommand(Player* bot, std::string const& command)
+    bool ExecutePlayerbotCommand(Player* bot, std::string const& command, Player* senderOverride)
     {
 #if AF_HAS_PLAYERBOTS
         PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
         if (ai && !command.empty())
         {
             Group* grp = bot->GetGroup();
-            Player* master = grp ? ObjectAccessor::FindConnectedPlayer(grp->GetLeaderGUID()) : nullptr;
+            Player* master = (senderOverride && senderOverride->GetSession()) ? senderOverride :
+                             (grp ? ObjectAccessor::FindConnectedPlayer(grp->GetLeaderGUID()) : nullptr);
+            if (master && master->GetSession() && ai->GetMaster() != master)
+            {
+                ai->SetMaster(master);
+            }
             ai->HandleCommand(CHAT_MSG_WHISPER, command, master ? master : bot);
             return true;
         }

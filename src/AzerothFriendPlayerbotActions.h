@@ -23,7 +23,7 @@ namespace AzerothFriendPlayerbotActions
     bool DoAction(Player* bot, std::string const& actionName, std::string const& param = "", bool silent = true);
 
     // Raw playerbot chat command passthrough (separator aware, denylist filtered).
-    bool DoCommand(Player* bot, std::string const& command);
+    bool DoCommand(Player* bot, std::string const& command, Player* senderOverride = nullptr);
 
     bool IsSupportedAction(Player* bot, std::string const& actionName);
     bool IsDeniedAction(std::string const& actionName);

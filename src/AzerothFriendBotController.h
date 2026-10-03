@@ -48,7 +48,7 @@ namespace AzerothFriendBotController
     std::string CollectSelfContext(Player* bot);
 
     // Playerbot integration
-    bool ExecutePlayerbotCommand(Player* bot, std::string const& command);
+    bool ExecutePlayerbotCommand(Player* bot, std::string const& command, Player* senderOverride = nullptr);
 
     // Stuck Recovery
     void TriggerStuckRecovery(Player* bot, float targetX, float targetY, float targetZ);

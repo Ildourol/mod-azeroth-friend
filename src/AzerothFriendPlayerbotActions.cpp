@@ -120,7 +120,7 @@ namespace AzerothFriendPlayerbotActions
 #endif
     }
 
-    bool DoCommand(Player* bot, std::string const& command)
+    bool DoCommand(Player* bot, std::string const& command, Player* senderOverride)
     {
         if (!bot || !bot->IsInWorld() || command.empty())
             return false;
@@ -160,9 +160,13 @@ namespace AzerothFriendPlayerbotActions
             if (IsDeniedCommand(part))
                 return false;
 
-            // Use the bot's human master if available with an active session,
+            // Use senderOverride or bot's master if available with an active session,
             // which satisfies PlayerbotSecurity checks; fallback to bot.
-            Player* sender = ai->GetMaster();
+            Player* sender = (senderOverride && senderOverride->GetSession()) ? senderOverride : ai->GetMaster();
+            if (sender && sender->GetSession() && ai->GetMaster() != sender)
+            {
+                ai->SetMaster(sender);
+            }
             if (!sender || !sender->GetSession())
                 sender = bot;
 
