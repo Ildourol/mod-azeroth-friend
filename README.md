@@ -1,6 +1,6 @@
 # AzerothFriend (mod-azeroth-friend)
 
-An autonomous AI companion module and client interface for AzerothCore (WoW 3.3.5a), bridging modern Large Language Models with in-game agency through mod-playerbots.
+An autonomous AI companion module, Python reasoning bridge, and WoW 3.3.5a client HUD for AzerothCore + mod-playerbots.
 
 ![AzerothFriend Companion Banner](assets/azeroth_friend_banner.jpg)
 
@@ -14,9 +14,12 @@ An autonomous AI companion module and client interface for AzerothCore (WoW 3.3.
   - [Dual-Channel Asynchronous Architecture](#dual-channel-asynchronous-architecture)
   - [Strict Thought-Action Coupling](#strict-thought-action-coupling)
   - [4-Tier Cognitive Hierarchy and Action Modes](#4-tier-cognitive-hierarchy-and-action-modes)
-  - [Focused Goals and Opt-in Autonomy](#focused-goals-and-opt-in-autonomy)
+  - [Focused Goals, AI Suggestions, and Opt-in Autonomy](#focused-goals-ai-suggestions-and-opt-in-autonomy)
   - [Natural-Language Spell Resolution](#natural-language-spell-resolution)
   - [RAM-First Live-State Transport](#ram-first-live-state-transport)
+  - [Offline World Catalogs and Grounded Planning](#offline-world-catalogs-and-grounded-planning)
+  - [JSON-RPC Gateway and CLI Control](#json-rpc-gateway-and-cli-control)
+  - [Modular Bridge Plugins](#modular-bridge-plugins)
   - [Zero-Token Sensory Reuse](#zero-token-sensory-reuse)
   - [Client HUD and Addon](#client-hud-and-addon)
 - [Repository Structure](#repository-structure)
@@ -30,10 +33,11 @@ An autonomous AI companion module and client interface for AzerothCore (WoW 3.3.
   - [6. In-Game Addon Setup](#6-in-game-addon-setup)
 - [Running the System](#running-the-system)
   - [Standalone Bridge](#standalone-bridge)
-  - [Dual-Bridge Orchestrator (with mod-llm-chatter)](#dual-bridge-orchestrator-with-mod-llm-chatter)
+  - [Bridge CLI and JSON-RPC](#bridge-cli-and-json-rpc)
+  - [Dual-Bridge Orchestrator with mod-llm-chatter](#dual-bridge-orchestrator-with-mod-llm-chatter)
 - [In-Game Commands Reference](#in-game-commands-reference)
   - [General and Inspection Commands](#general-and-inspection-commands)
-  - [Goal Management](#goal-management)
+  - [Goal Management and Suggestions](#goal-management-and-suggestions)
   - [Autonomy and Control](#autonomy-and-control)
   - [Action and Spell Dispatch](#action-and-spell-dispatch)
   - [Bot API v1 Inspection](#bot-api-v1-inspection)
@@ -46,120 +50,231 @@ An autonomous AI companion module and client interface for AzerothCore (WoW 3.3.
 
 ## Overview
 
-mod-azeroth-friend transforms standard non-player characters and playerbot bots into intelligent, goal-driven companions in World of Warcraft 3.3.5a. Rather than relying on rigid scripting or hardcoded state machines, the module connects AzerothCore with advanced reasoning engines (such as OpenAI models, Ollama, LM Studio, vLLM, or OpenRouter).
+AzerothFriend turns a mod-playerbots character into a persistent, goal-driven AI companion. It does not replace PlayerbotAI combat, movement, or game-rule enforcement. Instead, it adds a higher-level cognitive layer that can understand owner intent, maintain goals, inspect live world state, choose grounded capabilities, and dispatch verified actions through the server.
 
-The core philosophy separates mind from body:
-- The Python AI Bridge acts as the companion's mind: perceiving spatial surroundings, deliberating on owner commands, maintaining long-term and short-term goals, and formulating structured plans.
-- mod-playerbots acts as the companion's physical body: executing verified movements, managing combat rotations, following formations, navigating terrain, and performing trades.
+The runtime is intentionally split into three parts:
 
-Every thought formulated by the companion directly couples with native playerbot actions, ensuring deterministic physical execution without phantom or disconnected behavior.
+- **AzerothCore C++ module** — owns world-facing authority, bot claiming, action validation, Bot API v1 capability contracts, LiveState publication, telemetry, and final execution.
+- **Python bridge** — owns LLM calls, compact context building, goal planning, suggestions, memories, summaries, offline catalogs, JSON-RPC administration, and optional plugins.
+- **AzerothFriendUI addon** — presents context, goals, thoughts, action progress, API contracts, and controls inside the WoW 3.3.5a client.
+
+The supported server stack is the **mod-playerbots AzerothCore fork on the Playerbot branch together with mod-playerbots master**. Standard upstream AzerothCore alone is not the target runtime.
+
+The design follows one rule: the model may reason freely, but the server remains authoritative about what the companion can actually do.
 
 ---
 
 ## Architectural Topology
 
-The system operates across three decoupled layers to protect the game world from network delays and processing bottlenecks:
+The current architecture separates real-time game state from durable coordination and keeps external model latency away from the world loop:
 
-```
+~~~
 +-------------------------------------------------------------------------+
 |                       World of Warcraft 3.3.5a Client                   |
-|  +-------------------------------------------------------------------+  |
-|  |           AzerothFriendUI Addon (Lua 5.2 / XML Dashboard)         |  |
-|  |  [Context] [Mindset / Debug] [Actions] [Thoughts] [Bot API v1]    |  |
-|  +-------------------------------------------------------------------+  |
+|                                                                         |
+|  AzerothFriendUI                                                        |
+|  Context | Mindset | Actions | Thoughts | Bot API v1                   |
 +------------------------------------+------------------------------------+
-                                     | Telemetry & Slash Commands
+                                     |
+                                     | addon/system telemetry + commands
                                      v
 +-------------------------------------------------------------------------+
 |                         AzerothCore World Server                        |
 |                                                                         |
-|  [World Loop Thread: 50-100ms]                                          |
-|   - Zero blocking I/O, zero external HTTP calls                         |
-|   - Numeric GUID tracking and safe object resolution                    |
-|   - Action Dispatcher: verifies control revisions and preconditions     |
-|   - Bot Controller: interacts directly with mod-playerbots              |
+|  mod-azeroth-friend                                                     |
+|   - companion claiming / ownership gates                                |
+|   - Bot API v1 capability registry                                      |
+|   - action validation + dispatch                                        |
+|   - playerbot bindings                                                  |
+|   - environment / self-context telemetry                                |
+|   - LiveState TCP publisher                                             |
 |                                                                         |
-|  [Boost.Asio Loopback Worker Thread]                                    |
-|   - Non-blocking TCP socket server on 127.0.0.1:8377                    |
-|   - Length-prefixed JSON frames (<256 KiB), authenticated by secret     |
-|   - RAM snapshot ring buffer for line-of-sight surroundings             |
-+-------------------+---------------------------------+-------------------+
-                    | Authenticated TCP               | MySQL Queries
-                    | (Live State Socket)             | (Events & Actions)
-                    v                                 v
+|  mod-playerbots                                                         |
+|   - combat reflexes / rotations                                         |
+|   - movement, travel, interaction, trade, questing                      |
+|   - actual bot body and game execution                                  |
++----------------------+--------------------------+-----------------------+
+                       |                          |
+                       | TCP LiveState :8377      | MySQL durable state
+                       v                          v
 +-------------------------------------------------------------------------+
-|                  Decoupled Python Bridge (External Mind)                |
+|                         Python Companion Bridge                         |
 |                                                                         |
-|  - LiveState Transport Client: consumes fast surroundings snapshots     |
-|  - Sensory Ingestion: reuses observations from mod-llm-chatter          |
-|  - Context Builder: token-budgeted planning prompts (<2000 tokens)      |
-|  - Compound Multi-Action Planner: resolves intents into playerbot steps  |
-|  - Spellbook DBC Resolver: maps natural-language names to spell IDs     |
-|  - Async LLM Client: OpenAI / Ollama / OpenRouter reasoning engine      |
-+-------------------------------------------------------------------------+
-```
+|  planning + goals + memories + summaries                                |
+|  grounded action catalog + spell/world catalogs                         |
+|  OpenAI-compatible LLM client + thinking policy                         |
+|  mod-llm-chatter sensory reuse                                          |
+|  plugin engine                                                          |
+|  JSON-RPC 2.0 gateway :8378                                             |
++----------------------+--------------------------------------------------+
+                       |
+                       | loopback JSON-RPC
+                       v
+                 tools/af_ctl.py
+~~~
+
+Two channels are deliberately used:
+
+1. **LiveState TCP** on <code>127.0.0.1:8377</code> for fresh RAM-first world snapshots and bridge diagnostics.
+2. **MySQL** for durable events, goals, plans, action results, summaries, memories, and restart-safe state.
+
+The JSON-RPC gateway on <code>127.0.0.1:8378</code> is a separate operator interface exposed by the Python bridge. It is not the game-state transport.
 
 ---
 
 ## Key Features
 
 ### Dual-Channel Asynchronous Architecture
-The AzerothCore world loop runs at 50 to 100 milliseconds per tick. Any blocking operation freezes the game world for all connected players.
-- Real-time spatial perception and environmental deltas stream over an authenticated loopback TCP socket (`127.0.0.1:8377`) managed on an asynchronous Boost.Asio worker thread.
-- Priority action queues, owner dispatches, and durable summaries flow asynchronously through MySQL database tables (`azeroth_friend_events`, `azeroth_friend_actions`, `azeroth_friend_summaries`).
+
+The worldserver must never wait for an LLM or remote HTTP request.
+
+- The C++ side publishes compact LiveState snapshots from a background transport path.
+- The Python bridge performs model calls outside the game server.
+- Durable events and action plans use MySQL.
+- The server executes only validated actions and reports dispatch/completion state back to the bridge and addon.
+- When LiveState is disabled, the bridge can use the SQL compatibility path.
+
+This keeps slow model calls isolated from the AzerothCore world loop.
 
 ### Strict Thought-Action Coupling
-The companion cannot perform phantom or ungrounded actions. Every internal cognitive thought generated by the AI model maps directly to a native playerbot command, action, or strategy. Thinking and physical execution are tightly bonded:
-- "I will attack this wolf!" binds to Playerbot command `attack <guid>` with the `+grind` strategy.
-- "Following the master closely through the forest." binds to Playerbot command `follow` (`+follow,-stay`).
-- "Resting to recover health and mana." binds to Playerbot action `eat_drink` (`+stay`).
-- "Offering gold in trade." binds to Playerbot trade action `trade_set_gold`.
+
+AzerothFriend does not treat generated prose as execution. Plans are normalized against a grounded action catalog and then validated again by the server.
+
+Examples of grounded behavior include:
+
+- follow / stay / flee through playerbot strategy and movement bindings;
+- attack and combat-mode changes through server-side action dispatch;
+- spell requests resolved against the companion's learned spellbook;
+- quest, loot, trade, vendor, trainer, and interaction operations through registered capabilities;
+- manual Bot API v1 calls through <code>.af run</code>.
+
+The addon distinguishes planning, dispatch acknowledgement, and verified completion so a thought is not presented as a successful world action unless the runtime confirms it.
 
 ### 4-Tier Cognitive Hierarchy and Action Modes
-Companion behavior is structured into four cooperative tiers:
-1. Long-Term Goal: The core purpose or campaign ambition (for example, "Protect the master on the road to level 80").
-2. Short-Term Goal: The active immediate objective (for example, "Clear Defias bandits from the vineyard").
-3. Action Mode: The active situational posture (`combat`, `travel`, `idle`, `social`).
-4. Live Surroundings: Visible hostile units, friendly players, lootable corpses, and resource nodes within line-of-sight.
 
-Switching action modes automatically applies the corresponding native playerbot strategies (`+grind` for Combat, `+travel` for Travel, `+stay` for Idle, `+rpg` for Social) with zero token burn.
+The companion operates with four layers of context:
 
-### Focused Goals and Opt-in Autonomy
-- Focused Single Objective: One goal per companion persists across restarts until verified complete or blocked.
-- Opt-In Autonomy: Autonomy is disabled by default and fully controlled by the owner. While autonomy is disabled, direct owner commands, spell requests, and party whispers continue to operate normally.
-- Control Revision Gates: Every plan step dispatched by the Python bridge carries a control revision number. If an owner issues a new command while an LLM request is in-flight, the server bumps the revision counter and safely discards obsolete plan steps.
+1. **Long-term goal** — the broader purpose or campaign direction.
+2. **Short-term goal** — the active focused objective.
+3. **Action mode** — <code>combat</code>, <code>travel</code>, <code>idle</code>, or <code>social</code>.
+4. **Live surroundings and self-context** — nearby units/objects, combat state, master state, bags, gear, consumables, quests, and other current facts.
+
+The LLM chooses high-level intent while mod-playerbots remains responsible for fast combat reflexes and physical execution.
+
+### Focused Goals, AI Suggestions, and Opt-in Autonomy
+
+Autonomy is owner-controlled.
+
+- Autonomy can remain off while direct commands, spell requests, claims, catalog inspection, and manual actions continue to work.
+- Enabling autonomy requires a usable short- or long-term goal.
+- The bridge can generate a goal pair for a newly registered companion with empty goals when <code>AzerothFriend.Goal.AutoGenerate.Enable</code> is enabled.
+- Owners can request fresh AI suggestions for short-term goals, long-term goals, or tactical actions.
+- Suggested actions are grounded against the current world and action catalog instead of being free-form fantasy text.
+- Owner changes bump control state and interrupt obsolete plans so old model responses do not continue after the player has changed direction.
+- Claiming a companion and autonomous bridge control are mutually exclusive by design.
+
+Recent versions also preserve ordered multi-action execution so compound plans stay in sequence instead of racing independent steps.
 
 ### Natural-Language Spell Resolution
-Owners can request spells using everyday language (e.g., `.af cast frostbolt`, `.af cast greater heal on master`). The bridge resolves requests against:
-- The bot's learned spellbook.
-- AzerothCore DBC spell metadata.
-- Automatic highest-rank resolution with support for specific rank requests.
-- Server-side range, mana, line-of-sight, and cooldown validation.
+
+Owners can ask for spells by name rather than numeric IDs.
+
+The bridge combines:
+
+- the bot's learned spellbook;
+- client DBC metadata;
+- the cached spell catalog under <code>tools/data/</code>;
+- rank-aware matching;
+- server-side legality checks such as target, range, cooldown, mana, and line of sight.
+
+The model can suggest a spell, but the runtime decides whether the companion actually knows and can cast it.
 
 ### RAM-First Live-State Transport
-- Live world state travels over the loopback TCP socket directly from memory rather than querying the SQL database on every tick.
-- High-efficiency spatial snapshots provide nearby entities, combat posture, bag fullness, and quest states.
-- Compact context budgeting keeps input tokens around 2,000 tokens per request, preventing excessive API costs.
+
+LiveState is the fast path for companion perception.
+
+- Default listener: <code>127.0.0.1:8377</code>.
+- The shared secret is configured with <code>AzerothFriend.LiveState.Secret</code>.
+- The listener refuses to start with an empty secret.
+- Snapshots are cached in RAM and exposed to the planner without requiring a database query for every perception cycle.
+- The bridge reports cache/context diagnostics back to the server for the addon.
+- SQL remains available as a compatibility and durable-state layer.
+
+### Offline World Catalogs and Grounded Planning
+
+The bridge now ships static 3.3.5a catalogs:
+
+- <code>tools/data/spell_catalog.json</code>
+- <code>tools/data/world_catalog.json</code>
+
+The world catalog resolves maps, zones, subzones, and deterministic spatial calculations without an LLM call or live database lookup. <code>tools/generate_catalogs.py</code> can rebuild the map/area catalog from <code>Map.dbc</code> and <code>AreaTable.dbc</code>.
+
+This supports lower-token, more grounded prompts and operator queries such as zone search through the RPC CLI.
+
+### JSON-RPC Gateway and CLI Control
+
+The Python bridge exposes a loopback JSON-RPC 2.0 endpoint when <code>AzerothFriend.Rpc.Enable = 1</code>.
+
+Default endpoint:
+
+~~~
+http://127.0.0.1:8378/rpc
+~~~
+
+Built-in methods cover:
+
+- session status and health;
+- clean bridge shutdown;
+- companion listing and status;
+- manual action invocation;
+- goal changes;
+- mode changes;
+- autonomy toggling;
+- world-zone search and catalog statistics.
+
+The included <code>tools/af_ctl.py</code> client wraps these methods for shell use.
+
+### Modular Bridge Plugins
+
+The Python bridge can load extensions from <code>tools/plugins/</code> when <code>AzerothFriend.Plugins.Enable = 1</code>.
+
+Each plugin uses a <code>plugin.json</code> manifest and Python entrypoint. Plugins can:
+
+- receive bridge events;
+- use shared bridge services passed at load time;
+- perform shutdown cleanup;
+- publish custom JSON-RPC methods.
+
+A working example lives under <code>tools/plugins/sample_tactics/</code>.
 
 ### Zero-Token Sensory Reuse
-When paired with `mod-llm-chatter`, the companion bridge monitors shared chatter observations (such as lootable corpses, nearby gathering nodes, or player emotes). It converts those existing perception events into physical bot actions with zero additional LLM token usage.
+
+When paired with <code>mod-llm-chatter</code>, AzerothFriend can reuse already-observed world events such as loot, nearby resources, or dialogue context.
+
+This reduces duplicate model calls and lets one perception event drive both conversation and physical behavior where appropriate. Token-sharing and sensory-reuse counters are surfaced in bridge telemetry and the addon.
 
 ### Client HUD and Addon
-A complete World of Warcraft 3.3.5a addon (`AzerothFriendUI`) provides:
-- Live Context and Inventory Inspector (`avg_ilvl`, bag slots, consumable counts, quest tracking, master distance).
-- Cognitive Mindset Monitor displaying active state, commitment latency, and token savings telemetry.
-- Remote Control Bar for instant stance switching, claiming, syncing, and autonomy toggling.
-- Bot API v1 Contract Browser displaying typed capabilities, schemas, and verified execution outcomes.
-- Minimap docking button with tooltip status.
+
+<code>AzerothFriendUI</code> is the in-game control and debugging surface.
+
+The master window provides five tabs:
+
+1. **Context** — self-context, inventory, quests, master distance, and surroundings.
+2. **Mindset / Debug** — cognition state, claim status, transport health, thinking policy, and token telemetry.
+3. **Actions** — live plan/action state and direct control.
+4. **Thoughts** — reasoning, tactical/action timeline entries, speech, and memory output.
+5. **Bot API v1** — capability catalog, contracts, authority, bindings, and verified results.
+
+Recent UI work also adds grounded action suggestions and stronger thinking-lock/debounce behavior so background telemetry does not prematurely clear an active thinking state.
 
 ---
 
 ## Repository Structure
 
-```text
+~~~text
 mod-azeroth-friend/
 ├── Addon/
-│   └── AzerothFriendUI/          # WoW 3.3.5a client interface (Lua 5.2 / XML)
+│   └── AzerothFriendUI/
 │       ├── AzerothFriendGoals.lua
 │       ├── AzerothFriendProtocol.lua
 │       ├── AzerothFriendUI.lua
@@ -167,73 +282,85 @@ mod-azeroth-friend/
 │       ├── AzerothFriendUI.xml
 │       └── README.md
 ├── assets/
-│   └── azeroth_friend_banner.jpg # Module artwork banner
+│   └── azeroth_friend_banner.jpg
 ├── conf/
-│   └── mod_azeroth_friend.conf.dist # Production configuration template
+│   └── mod_azeroth_friend.conf.dist
 ├── data/
 │   └── sql/
-│       └── characters/           # Database migrations
-│           ├── base/             # Base table definitions
-│           └── updates/          # Idempotent incremental migrations
-├── src/                          # C++ module source code (AzerothCore hooks)
-│   ├── AzerothFriendActionDispatcher.cpp / .h
-│   ├── AzerothFriendActionRegistry.cpp / .h
-│   ├── AzerothFriendAiControl.cpp / .h
-│   ├── AzerothFriendBotController.cpp / .h
-│   ├── AzerothFriendChatHook.cpp / .h
-│   ├── AzerothFriendCommand.cpp / .h
-│   ├── AzerothFriendConfig.cpp / .h
-│   ├── AzerothFriendEnvironment.cpp / .h
-│   ├── AzerothFriendLiveState.cpp / .h
+│       └── characters/
+│           ├── base/
+│           └── updates/
+├── src/
+│   ├── AzerothFriendActionDispatcher.*
+│   ├── AzerothFriendActionRegistry.*
+│   ├── AzerothFriendAiControl.*
+│   ├── AzerothFriendBotController.*
+│   ├── AzerothFriendChatHook.*
+│   ├── AzerothFriendCommand.*
+│   ├── AzerothFriendConfig.*
+│   ├── AzerothFriendEnvironment.*
+│   ├── AzerothFriendLiveState.*
 │   ├── AzerothFriendPlayerbot.h
-│   ├── AzerothFriendPlayerbotActions.cpp / .h
+│   ├── AzerothFriendPlayerbotActions.*
 │   ├── AzerothFriendScriptLoader.cpp
-│   ├── AzerothFriendShared.cpp / .h
-│   └── AzerothFriendSnapshotMemory.cpp / .h
-├── tools/                        # Decoupled Python cognitive engine
-│   ├── azeroth_friend_bridge.py  # Daemon event loop
-│   ├── friend_action_catalog.py  # Action schema and parameter normalization
-│   ├── friend_chatter_consumer.py# Sensory reuse and chatter ingestion
-│   ├── friend_co_processor.py    # Dual-model coordination
-│   ├── friend_command_parser.py  # Natural-language command parser
-│   ├── friend_constants.py       # Constants and enums
-│   ├── friend_context.py         # Compact context generator
-│   ├── friend_db.py              # MySQL connector and state queries
-│   ├── friend_goals.py           # Goal lifecycle and progress tracking
-│   ├── friend_livestate.py       # LiveState TCP transport client
-│   ├── friend_llm.py             # OpenAI-compatible API client
-│   ├── friend_memory.py          # Episodic memory and affinity
-│   ├── friend_mindset.py         # Cognitive commitment and focus
-│   ├── friend_monitor.py         # System telemetry monitor
-│   ├── friend_planner.py         # Compound plan generator
-│   ├── friend_prompts.py         # System prompts and schema formatting
-│   ├── friend_spells.py          # Spellbook resolver
-│   ├── friend_summaries.py       # Zero-token verified summaries
-│   ├── friend_thinking.py        # Thinking/reasoning model policy
-│   ├── requirements.txt          # Python dependencies
-│   ├── spell_dbc.py              # AzerothCore DBC spell parser
-│   └── data/
-│       └── spell_catalog.json    # Cached spell metadata
-├── include.sh                    # Shell loader
-├── mod-azeroth-friend.cmake      # CMake module definition
-├── start_bridge.bat              # Standalone bridge launcher
-├── start_all_bridges.bat          # Dual-bridge orchestrator
-└── README.md                     # Project documentation
-```
+│   ├── AzerothFriendShared.*
+│   └── AzerothFriendSnapshotMemory.*
+├── tools/
+│   ├── af_ctl.py
+│   ├── azeroth_friend_bridge.py
+│   ├── friend_action_catalog.py
+│   ├── friend_catalogs.py
+│   ├── friend_chatter_consumer.py
+│   ├── friend_co_processor.py
+│   ├── friend_command_parser.py
+│   ├── friend_constants.py
+│   ├── friend_context.py
+│   ├── friend_db.py
+│   ├── friend_goals.py
+│   ├── friend_livestate.py
+│   ├── friend_llm.py
+│   ├── friend_memory.py
+│   ├── friend_mindset.py
+│   ├── friend_monitor.py
+│   ├── friend_planner.py
+│   ├── friend_plugins.py
+│   ├── friend_prompts.py
+│   ├── friend_rpc.py
+│   ├── friend_spells.py
+│   ├── friend_summaries.py
+│   ├── friend_thinking.py
+│   ├── generate_catalogs.py
+│   ├── requirements.txt
+│   ├── spell_dbc.py
+│   ├── data/
+│   │   ├── spell_catalog.json
+│   │   └── world_catalog.json
+│   └── plugins/
+│       └── sample_tactics/
+│           ├── plugin.json
+│           └── plugin.py
+├── include.sh
+├── mod-azeroth-friend.cmake
+├── start_bridge.bat
+├── start_all_bridges.bat
+└── README.md
+~~~
 
 ---
 
 ## Prerequisites
 
-Before setting up mod-azeroth-friend, ensure your environment meets the following requirements:
+Before installing AzerothFriend, have the following working first:
 
-1. AzerothCore WotLK (branch 3.3.5a) compiled with `mod-playerbots` installed and functioning.
-2. MySQL 5.7+ or MariaDB 10.3+ hosting the `acore_characters` database.
-3. Python 3.8 or newer installed on the machine running the AI bridge.
-4. An LLM Provider supporting OpenAI-compatible chat completions:
-   - Cloud providers: OpenAI (gpt-4o, gpt-4o-mini, o3-mini), OpenRouter, Anthropic (via proxy).
-   - Local engines: Ollama, vLLM, LM Studio, LocalAI.
-5. World of Warcraft 3.3.5a client (Build 12340) for the companion HUD addon.
+1. **Core fork:** <code>mod-playerbots/azerothcore-wotlk</code>, branch <code>Playerbot</code>.
+2. **Playerbots module:** <code>mod-playerbots/mod-playerbots</code>, branch <code>master</code>, installed under the core <code>modules/</code> tree.
+3. MySQL/MariaDB with the normal AzerothCore databases and Playerbots schema available.
+4. Python 3 with the packages from <code>tools/requirements.txt</code>.
+5. A supported model endpoint. The bridge is designed around OpenAI-compatible chat-completions style providers and also contains Anthropic support.
+6. WoW 3.3.5a build 12340 if using the addon.
+7. Client DBC data if you want to rebuild offline spell/world catalogs.
+
+Do not install this module against plain upstream AzerothCore and assume Playerbots hooks will be equivalent.
 
 ---
 
@@ -241,313 +368,408 @@ Before setting up mod-azeroth-friend, ensure your environment meets the followin
 
 ### 1. C++ Module Compilation
 
-1. Clone or place this repository into your AzerothCore `modules` directory:
-   ```bash
-   cd azerothcore/modules
-   git clone https://github.com/Ildourol/mod-azeroth-friend.git
-   ```
+Clone the required Playerbots core and modules:
 
-2. Re-run CMake generation from your AzerothCore build directory:
-   ```bash
-   cd azerothcore/build
-   cmake ../ -DCMAKE_INSTALL_PREFIX=/path/to/server
-   ```
+~~~bash
+git clone https://github.com/mod-playerbots/azerothcore-wotlk.git --branch=Playerbot
+cd azerothcore-wotlk/modules
+git clone https://github.com/mod-playerbots/mod-playerbots.git --branch=master
+git clone https://github.com/Ildourol/mod-azeroth-friend.git
+~~~
 
-3. Build the server or module target:
-   ```bash
-   # Linux
-   make -j$(nproc)
-   make install
+Then compile using your normal Playerbots/AzerothCore workflow. For the current Playerbot fork, the helper workflow is typically:
 
-   # Windows (Visual Studio)
-   cmake --build . --config Release --target ALL_BUILD -j 4
-   ```
+~~~bash
+cd ~/azerothcore-wotlk
+./acore.sh install-deps
+./acore.sh compiler all
+~~~
+
+After installation, verify that <code>authserver</code> and <code>worldserver</code> exist in the configured distribution <code>bin</code> directory.
+
+AzerothFriend is a compiled C++ module. C++ changes require rebuilding worldserver.
 
 ### 2. Database Migrations
 
-If `Updates.EnableDatabases` in your `worldserver.conf` includes characters (default `7`), migrations apply automatically on worldserver boot.
+The repository contains its character-database schema under:
 
-To apply migrations manually against `acore_characters`:
-```bash
-mysql -u acore -p acore_characters < data/sql/characters/base/00000000_azeroth_friend_tables.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_19_azeroth_friend_action_executor.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_19_azeroth_friend_event_status_and_commands.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_20_azeroth_friend_claim_bridge_gate.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_20_azeroth_friend_goals.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_20_azeroth_friend_long_term_goal.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_20_azeroth_friend_ram_first_context.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_20_azeroth_friend_telemetry.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_21_azeroth_friend_action_modes.sql
-mysql -u acore -p acore_characters < data/sql/characters/updates/2026_09_21_azeroth_friend_bot_api_v1.sql
-```
+~~~text
+data/sql/characters/base/
+data/sql/characters/updates/
+~~~
 
-All migrations are fully idempotent. Running them multiple times will never overwrite existing companion goals, inventory records, or personality configurations.
+Use the AzerothCore/module database updater where available. On an existing installation, make sure the current AzerothFriend schema and updates have been applied before starting the Python bridge; the bridge performs schema checks at startup and will stop when required context tables/columns are missing.
+
+For a manual recovery/import, apply the base schema first and then the update files in chronological order to <code>acore_characters</code>. Do not repeatedly hand-edit the schema to match Python errors; use the repository SQL files as the source of truth.
 
 ### 3. Registering a Companion
 
-Register any existing playerbot character in the `azeroth_friend_bots` table:
+The bridge can automatically register names from <code>AzerothFriend.ControlledBots</code>. You can also register or inspect companions directly in <code>azeroth_friend_bots</code>.
 
-```sql
+A minimal manual example:
+
+~~~sql
 INSERT INTO azeroth_friend_bots (
     bot_guid,
     bot_name,
     mode,
     personality,
-    long_term_goal,
-    current_goal,
     enabled
 ) VALUES (
-    12345,                                    -- Character GUID of the playerbot
-    'Friendbot',                              -- Character Name
-    'companion',                              -- Operating mode
+    12345,
+    'Friendbot',
+    'companion',
     'A steadfast dwarven warrior who values honor and a good pint of ale.',
-    'Help my companion conquer the dungeons of Azeroth.',
-    'Clear the gnolls threatening the eastern border.',
     1
-) ON DUPLICATE KEY UPDATE enabled = 1;
-```
+)
+ON DUPLICATE KEY UPDATE enabled = 1;
+~~~
+
+Goal fields may be left empty if you want the bridge's one-time goal auto-generation to initialize them.
 
 ### 4. Configuration Setup
 
-Copy the distribution configuration file to your worldserver module configuration directory:
+The distributed template is:
 
-```bash
-cp conf/mod_azeroth_friend.conf.dist /path/to/server/etc/modules/mod_azeroth_friend.conf
-```
+~~~text
+conf/mod_azeroth_friend.conf.dist
+~~~
 
-Edit `mod_azeroth_friend.conf` and adjust key settings:
+When the module is installed, use the generated module config in the server's <code>etc/modules/</code> directory. If it has not been created automatically, copy the distribution file and remove the <code>.dist</code> suffix.
 
-- Database Credentials:
-  ```ini
-  AzerothFriend.Database.Host = "127.0.0.1"
-  AzerothFriend.Database.Port = 3306
-  AzerothFriend.Database.User = "acore"
-  AzerothFriend.Database.Password = "acore"
-  AzerothFriend.Database.CharactersDB = "acore_characters"
-  AzerothFriend.Database.WorldDB = "acore_world"
-  ```
+At minimum, review:
 
-- Managed Bots Allowlist:
-  ```ini
-  AzerothFriend.ControlledBots = "Friendbot"
-  AzerothFriend.MaxControlledBots = 1
-  ```
+~~~ini
+AzerothFriend.Enable = 1
 
-- Live-State Transport Secret (must match in bridge and C++ module):
-  ```ini
-  AzerothFriend.LiveState.Enable = 1
-  AzerothFriend.LiveState.Host = "127.0.0.1"
-  AzerothFriend.LiveState.Port = 8377
-  AzerothFriend.LiveState.Secret = "your-secure-random-secret-key"
-  ```
+AzerothFriend.ControlledBots = "Friendbot"
+AzerothFriend.MaxControlledBots = 1
 
-- LLM Provider Configuration:
-  ```ini
-  AzerothFriend.LLM.Provider = "openai"
-  AzerothFriend.LLM.BaseUrl = "https://api.openai.com/v1"
-  AzerothFriend.LLM.ApiKey = "sk-..."
-  AzerothFriend.LLM.Model = "gpt-4o-mini"
-  AzerothFriend.LLM.MaxTokens = 800
-  AzerothFriend.LLM.Temperature = 0.7
-  ```
+AzerothFriend.Database.Host = "127.0.0.1"
+AzerothFriend.Database.Port = 3306
+AzerothFriend.Database.User = "acore"
+AzerothFriend.Database.Password = "acore"
+AzerothFriend.Database.CharactersDB = "acore_characters"
+AzerothFriend.Database.WorldDB = "acore_world"
+
+AzerothFriend.LiveState.Enable = 1
+AzerothFriend.LiveState.Host = "127.0.0.1"
+AzerothFriend.LiveState.Port = 8377
+AzerothFriend.LiveState.Secret = "REPLACE_WITH_A_RANDOM_SECRET"
+
+AzerothFriend.Rpc.Enable = 1
+AzerothFriend.Rpc.Host = "127.0.0.1"
+AzerothFriend.Rpc.Port = 8378
+
+AzerothFriend.Plugins.Enable = 1
+~~~
+
+Generate a LiveState secret once, for example:
+
+~~~bash
+openssl rand -hex 32
+~~~
+
+Keep both LiveState and RPC bound to loopback unless you are intentionally adding a separate authenticated network layer. The built-in RPC server is designed as a local operator interface.
+
+Then configure your model provider:
+
+~~~ini
+AzerothFriend.LLM.Provider = "openai"
+AzerothFriend.LLM.BaseUrl = "https://api.openai.com/v1"
+AzerothFriend.LLM.ApiKey = "YOUR_API_KEY_HERE"
+AzerothFriend.LLM.Model = "gpt-4o-mini"
+AzerothFriend.LLM.MaxTokens = 800
+AzerothFriend.LLM.Temperature = 0.7
+
+AzerothFriend.LLM.Thinking.Mode = "Auto"
+AzerothFriend.LLM.Thinking.AutoDetect = 1
+AzerothFriend.LLM.Thinking.ModelType = "Auto"
+AzerothFriend.LLM.Thinking.Effort = "low"
+~~~
 
 ### 5. Python Bridge Installation
 
-1. Open a terminal in the `tools` directory:
-   ```bash
-   cd tools
-   ```
+Install the bridge dependencies:
 
-2. Install Python dependencies:
-   ```bash
-   pip install --upgrade -r requirements.txt
-   ```
+~~~bash
+cd ~/azerothcore-wotlk/modules/mod-azeroth-friend/tools
+python3 -m pip install --upgrade -r requirements.txt
+~~~
 
-3. Run the preflight healthcheck to verify database connectivity, configuration parsing, and LLM endpoint accessibility:
-   ```bash
-   python azeroth_friend_bridge.py --config ../conf/mod_azeroth_friend.conf --healthcheck
-   ```
+Run a preflight health check before starting the long-running bridge:
+
+~~~bash
+python3 azeroth_friend_bridge.py   --config /path/to/server/etc/modules/mod_azeroth_friend.conf   --healthcheck
+~~~
+
+Then start the bridge normally:
+
+~~~bash
+python3 azeroth_friend_bridge.py   --config /path/to/server/etc/modules/mod_azeroth_friend.conf
+~~~
+
+On Windows, <code>start_bridge.bat</code> is provided as a convenience launcher. <code>start_all_bridges.bat</code> starts the combined AzerothFriend + mod-llm-chatter workflow.
 
 ### 6. In-Game Addon Setup
 
-1. Copy the `Addon/AzerothFriendUI` folder into your World of Warcraft client directory:
-   ```text
-   <WoW 3.3.5 Directory>/Interface/AddOns/AzerothFriendUI/
-   ```
+Copy:
 
-2. Verify the contents of `AzerothFriendUI`:
-   - `AzerothFriendUI.toc`
-   - `AzerothFriendUI.lua`
-   - `AzerothFriendUI.xml`
-   - `AzerothFriendGoals.lua`
-   - `AzerothFriendProtocol.lua`
+~~~text
+Addon/AzerothFriendUI/
+~~~
 
-3. Start World of Warcraft, log into character select, click the **AddOns** button in the lower-left corner, and ensure **AzerothFriend UI** is checked and set to load out-of-date addons if prompted.
+to:
+
+~~~text
+World of Warcraft 3.3.5/Interface/AddOns/AzerothFriendUI/
+~~~
+
+Verify the folder contains at least:
+
+- <code>AzerothFriendUI.toc</code>
+- <code>AzerothFriendUI.lua</code>
+- <code>AzerothFriendUI.xml</code>
+- <code>AzerothFriendGoals.lua</code>
+- <code>AzerothFriendProtocol.lua</code>
+
+Enable **AzerothFriend UI** from the AddOns button on the character-select screen.
 
 ---
 
 ## Running the System
 
+Start MySQL, authserver, and worldserver using your normal AzerothCore/Playerbots workflow, then start the Python bridge.
+
 ### Standalone Bridge
 
-To start the standalone cognitive bridge:
-```bash
-# On Windows
+Linux:
+
+~~~bash
+cd ~/azerothcore-wotlk/modules/mod-azeroth-friend/tools
+python3 azeroth_friend_bridge.py   --config ~/azerothcore-wotlk/env/dist/etc/modules/mod_azeroth_friend.conf
+~~~
+
+Windows:
+
+~~~bat
 start_bridge.bat
+~~~
 
-# On Linux / macOS
-cd tools
-python azeroth_friend_bridge.py --config /path/to/server/etc/modules/mod_azeroth_friend.conf
-```
+A healthy startup should initialize database access, LiveState, the optional JSON-RPC gateway, and the plugin manager.
 
-### Dual-Bridge Orchestrator (with mod-llm-chatter)
+### Bridge CLI and JSON-RPC
 
-When running both `mod-llm-chatter` (for dialogue and banter) and `mod-azeroth-friend` (for planning and agency), launch the dual-bridge runner:
-```bash
+With the bridge running and RPC enabled:
+
+~~~bash
+python3 tools/af_ctl.py status
+python3 tools/af_ctl.py health
+python3 tools/af_ctl.py list
+python3 tools/af_ctl.py bot 12345
+python3 tools/af_ctl.py mode 12345 travel
+python3 tools/af_ctl.py goal 12345 "Travel to the next quest hub"
+python3 tools/af_ctl.py autonomy 12345 on
+python3 tools/af_ctl.py invoke 12345 follow "{}"
+python3 tools/af_ctl.py zone "Elwynn"
+python3 tools/af_ctl.py stats
+~~~
+
+The CLI defaults to <code>http://127.0.0.1:8378/rpc</code>.
+
+### Dual-Bridge Orchestrator with mod-llm-chatter
+
+AzerothFriend can operate alone, but it has explicit integration with <code>mod-llm-chatter</code> for shared perception, speech ownership, and token reuse.
+
+On Windows:
+
+~~~bat
 start_all_bridges.bat
-```
+~~~
 
-This launches both bridges into isolated console processes. The companion bridge automatically listens to sensory observations published by `mod-llm-chatter`, saving thousands of LLM tokens each session.
+On Linux, run each bridge as its own service/process and point both at their installed configuration files. AzerothFriend's chatter settings control whether ambient speech is delegated, whether sensory events are reused, and whether token-sharing behavior is enabled.
 
 ---
 
 ## In-Game Commands Reference
 
-Commands can be invoked in-game or from the server console using `.af`, `/af`, `.friend`, or `/friend`.
+The server-side command prefix is <code>.af</code>. The addon also exposes <code>/af</code> slash commands for UI and convenience controls.
 
 ### General and Inspection Commands
 
-| Command | Description |
-|---|---|
-| `.af status` | Displays bridge connection health, RAM vs SQL mode, and token savings telemetry. |
-| `.af bots` | Lists all registered companion bots, their online status, mode, and claim state. |
-| `.af sync` | Requests an immediate zero-token server context refresh to the client addon. |
-| `.af diag [bot]` | Outputs diagnostic information regarding leases, playerbot AI state, and last action results. |
-| `.af inspect [bot]` | Broadcasts a live context snapshot packet directly to the owner addon. |
-| `.af reset` | Prints instructions to reset addon window frames to default screen coordinates. |
-| `.af debug [on\|off]` | Toggles verbose diagnostic logging in the server console and world log. |
+Common server commands include:
 
-### Goal Management
-
-| Command | Description |
+| Command | Purpose |
 |---|---|
-| `.af goal [bot] set <text>` | Defines a new short-term goal for the companion (automatically pauses autonomy). |
-| `.af goal [bot] show` | Displays the companion's current active goal, status, and progress. |
-| `.af goal [bot] pause` | Temporarily suspends the active goal and disables autonomy. |
-| `.af goal [bot] resume` | Resumes a paused goal (requires an existing goal). |
-| `.af goal [bot] complete` | Marks the current goal as successfully completed and resets autonomy. |
-| `.af goal [bot] clear` | Cancels the active goal, removes goal data, and disables autonomy. |
+| <code>.af status [bot]</code> | Show companion status. |
+| <code>.af diag [bot]</code> | Show runtime/lease/playerbot diagnostics. |
+| <code>.af context [bot]</code> | Refresh or inspect companion context. |
+| <code>.af thinking [low\|normal\|high]</code> | Change the thinking cadence tier. |
+| <code>.af claim &lt;bot&gt;</code> | Claim the companion for direct owner control. |
+| <code>.af release &lt;bot&gt;</code> | Release the claim and reconnect bridge control with autonomy still off. |
+
+Use <code>.af</code> with no valid subcommand to print the current server-side help for your build.
+
+### Goal Management and Suggestions
+
+Goal and suggestion commands include:
+
+~~~text
+.af goal [bot] set <short-term goal>
+.af goal [bot] longterm <long-term goal>
+.af goal [bot] show
+.af goal [bot] pause
+.af goal [bot] resume
+.af goal [bot] complete
+.af goal [bot] clear
+.af goal [bot] generate [both|long|short]
+.af suggest [bot] [both|long|short|actions]
+.af generate [bot] [both|long|short|actions]
+~~~
+
+Suggestion requests are handled by the bridge even when autonomy is disabled. The bridge can return grounded tactical action suggestions in addition to goal text.
 
 ### Autonomy and Control
 
-| Command | Description |
-|---|---|
-| `.af autonomy [bot] on` | Enables autonomous cognitive operation (requires an active focused goal). |
-| `.af autonomy [bot] off` | Disables autonomous operation; companion obeys direct orders only. |
-| `.af autonomy [bot] status` | Shows current autonomy state, tick rate, and execution revision. |
-| `.af mode [bot] <combat\|travel\|idle\|social>` | Sets the tactical action mode and applies corresponding playerbot strategies. |
-| `.af claim [bot]` | Claims exclusive ownership lease on the bot, suspending ambient wander. |
-| `.af release [bot]` | Releases exclusive lease back to normal playerbot behaviors. |
+~~~text
+.af autonomy [bot] on
+.af autonomy [bot] off
+.af autonomy [bot] status
+~~~
+
+Important behavior:
+
+- autonomy requires a focused short- or long-term goal;
+- owner commands remain available while autonomy is off;
+- claiming the bot disables bridge autonomy;
+- releasing a claim reconnects bridge control but does not silently turn autonomy back on;
+- owner changes interrupt stale in-flight plans.
 
 ### Action and Spell Dispatch
 
-| Command | Description |
-|---|---|
-| `.af cast <spell> [target]` | Casts a spell using natural language name resolution against the bot's learned spellbook. |
-| `.af action <name>` | Immediately dispatches a curated playerbot action (e.g., `follow`, `stay`, `loot`, `eat_drink`). |
-| `.af run <bot> <action> [json]` | Manually executes a typed Bot API action with optional JSON arguments (requires GM or owner authority). |
+The addon exposes convenient slash actions such as:
+
+~~~text
+/af attack
+/af follow
+/af stay
+/af flee
+/af loot
+/af rest
+/af rpg <quest id>
+/af accept
+/af reward <1-6>
+/af open
+/af trainer
+/af action <catalog action>
+~~~
+
+Natural-language spell requests are supported through the companion command path and learned-spell resolver.
+
+For low-level manual capability dispatch, prefer Bot API v1 rather than inventing raw playerbot commands.
 
 ### Bot API v1 Inspection
 
-| Command | Description |
-|---|---|
-| `.af catalog [filter] [bot]` | Lists indexed Bot API capabilities and exported playerbot actions. |
-| `.af catalog describe <capability>` | Displays full parameter schema, preconditions, authority level, and completion policy. |
-| `.af events [limit]` | Inspects recently queued inbound companion events and their processing state. |
-| `.af actions [limit]` | Displays the outbound action queue and execution status. |
+Bot API v1 is server-owned. The addon and bridge consume the contract; they do not redefine it.
+
+Useful commands:
+
+~~~text
+.af catalog [filter] [bot]
+.af catalog describe <capability> [bot]
+.af run <bot> <action> [json params]
+~~~
+
+The contract view exposes capability metadata such as:
+
+- category and authority;
+- parameter/result schemas;
+- native binding kind;
+- preconditions;
+- completion policy;
+- dispatch and verification status.
+
+The bridge caches the live capability catalog by revision and refreshes it when the server changes the contract.
 
 ---
 
 ## Addon Interface Guide (AzerothFriendUI)
 
-The client addon provides a 5-tab master HUD accessible via `/af` or by clicking the minimap icon.
+Open the master HUD with:
 
-```
-+-------------------------------------------------------------------------+
-| [ AzerothFriend UI ]                       [Status: NORMAL] [Tokens: 0] |
-+-------------------------------------------------------------------------+
-| [Tab 1: Context] [Tab 2: Mindset] [Tab 3: Actions] [Tab 4: Thoughts] ... |
-+-------------------------------------------------------------------------+
-| Master Distance: 4.2 yds   | Target: Defias Cutpurse                    |
-| Gear ilvl: 18.4            | Free Bags: 12 / 16                         |
-| Water: 8 | Food: 14        | Potions: 2                                 |
-| Zone: Elwynn Forest        | SubZone: Northshire Valley [OUTDOORS]      |
-|                                                                         |
-| Active Goal: Clear Defias bandits from the vineyard                     |
-| Progress: 3 / 8 bandits defeated                                        |
-+-------------------------------------------------------------------------+
-| [Control Bar]                                                           |
-| [Claim / Release] [Combat] [Travel] [Idle] [Social] [Sync] [Autonomy]   |
-+-------------------------------------------------------------------------+
-```
+~~~text
+/af
+~~~
+
+You can also use <code>/azerothfriend</code> or <code>/friend</code>.
 
 ### Tab Breakdown
 
-1. Context Inspector (`/af context`):
-   Real-time view of companion gear average item level, free bag slots, consumable stockpiles (food, water, potions), active quest progression, zone resting status, and distance to master. Uses zero LLM tokens.
+| Tab | What it shows |
+|---|---|
+| **Context** | Self-context, bags, gear, consumables, quests, master distance, zone/subzone, and surroundings. |
+| **Mindset / Debug** | Active mindset, commitment window, claim/autonomy state, thinking policy, transport status, and token counters. |
+| **Actions** | Current action/plan state, execution results, action-mode controls, and direct commands. |
+| **Thoughts** | Thought stream, tactical/action badges, speech, memories, and goal reasoning. |
+| **Bot API v1** | Live capability catalog, contract details, authority, bindings, and verified outcomes. |
 
-2. Cognitive Mindset & Telemetry (`/af debug`):
-   Displays active mindset state (`RESTING`, `LOOTING`, `FOLLOWING`, `COMBAT`, `EXPLORING`, `SOCIAL`, `IDLE`), commitment latency countdown (preventing ADHD task-switching), and cumulative LLM token savings.
-
-3. Action Execution Pipeline (`/af actions`):
-   Inspects recently executed actions, step revisions, dispatch acknowledgements, and verified world-state outcomes.
-
-4. Thought and Reasoning Stream (`/af thoughts`):
-   Live feed of companion internal monologue, reasoning traces, and spoken party responses with anti-repetition filtering.
-
-5. Bot API v1 Contract Browser (`/af api`):
-   Interactive catalog of all capabilities supported by the companion, including argument schemas, execution preconditions, authority tiers, and Shift-click manual execution.
+The minimap button toggles the HUD and can switch between unified and floating layouts.
 
 ### Addon Slash Commands
 
-- `/af` - Toggle Unified Master HUD.
-- `/af context` - Jump to Context Inspector.
-- `/af debug` - Jump to Mindset & Debug Monitor.
-- `/af thoughts` - Open Thought & Speech log.
-- `/af api` - Open Bot API v1 Catalog.
-- `/af goals` - Open Focused Goal manager.
-- `/af minimap` - Toggle minimap docking icon.
-- `/af layout` - Switch between unified tabbed HUD and detached floating panels.
-- `/af reset` - Reset window coordinates to screen center.
+Common addon commands:
+
+~~~text
+/af
+/af context
+/af debug
+/af actions
+/af thoughts
+/af api
+/af catalog
+/af sync
+/af minimap
+/af layout
+/af reset
+/af claim
+/af release
+~~~
+
+Long telemetry payloads are chunked and reassembled by the addon protocol so large context and API responses are not limited to a single chat line.
 
 ---
 
 ## Configuration Reference
 
-Key configuration parameters in `mod_azeroth_friend.conf`:
+The full authoritative list is <code>conf/mod_azeroth_friend.conf.dist</code>. These are the highest-impact settings:
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `AzerothFriend.Enable` | int | `1` | Enables or disables the C++ module. |
-| `AzerothFriend.Debug` | int | `0` | Enables verbose server console debugging. |
-| `AzerothFriend.ControlledBots` | string | `""` | Comma-separated list of allowed bot names. Empty manages all registered bots. |
-| `AzerothFriend.MaxControlledBots` | int | `1` | Maximum number of concurrent bots managed by the module. |
-| `AzerothFriend.TickIntervalMs` | int | `500` | Frequency in milliseconds for polling and dispatching pending actions. |
-| `AzerothFriend.Environment.ScanRadius` | float | `30.0` | Radius in yards for line-of-sight surroundings scanning. |
-| `AzerothFriend.Environment.MaxVisibleEntities` | int | `20` | Maximum visible entities included in environment snapshots. |
-| `AzerothFriend.Environment.DeltaDistance` | float | `5.0` | Distance moved before triggering an updated surroundings snapshot. |
-| `AzerothFriend.Environment.StorageMode` | int | `1` | `1` = RAM ring buffer (fastest), `2` = SQL table storage. |
-| `AzerothFriend.LiveState.Enable` | int | `1` | Enables loopback TCP socket live-state transport. |
-| `AzerothFriend.LiveState.Port` | int | `8377` | Loopback TCP socket port. |
-| `AzerothFriend.LiveState.Secret` | string | `""` | Authentication secret shared between server and Python bridge. |
-| `AzerothFriend.Autonomy.Enable` | int | `1` | Enables the autonomous decision-making loop. |
-| `AzerothFriend.Autonomy.TickSeconds` | int | `5` | Cadence in seconds between autonomous planning iterations. |
-| `AzerothFriend.MultiActionPlan.Enable` | int | `1` | Enables compound multi-step action planning per LLM call. |
-| `AzerothFriend.MultiActionPlan.MaxSteps` | int | `5` | Maximum steps allowed in a single compound plan. |
-| `AzerothFriend.SpellSync.Enable` | int | `1` | Enables spellbook and DBC indexing for natural-language spellcasting. |
-| `AzerothFriend.Chat.DelegateAmbientToLLMChatter` | int | `1` | Delegates ambient chat generation to `mod-llm-chatter` to conserve tokens. |
-| `AzerothFriend.Context.Compact.TargetInputTokens`| int | `2000` | Target input token budget per planning prompt. |
-| `AzerothFriend.Context.Compact.MaxInputTokens` | int | `3500` | Hard ceiling for planning prompt token size. |
+| Parameter | Default | Purpose |
+|---|---:|---|
+| <code>AzerothFriend.Enable</code> | <code>1</code> | Enables the module. |
+| <code>AzerothFriend.ControlledBots</code> | <code>Friendbot,Ollamatest</code> | Comma-separated bot allowlist. |
+| <code>AzerothFriend.MaxControlledBots</code> | <code>1</code> | Maximum concurrently managed companions. |
+| <code>AzerothFriend.TickIntervalMs</code> | <code>500</code> | C++ pending-action polling interval. |
+| <code>AzerothFriend.Environment.ScanRadius</code> | <code>30.0</code> | Nearby environment scan radius in yards. |
+| <code>AzerothFriend.Environment.MaxVisibleEntities</code> | <code>20</code> | Cap on visible entities in environment context. |
+| <code>AzerothFriend.LiveState.Enable</code> | <code>1</code> | Enables RAM-first TCP state transport. |
+| <code>AzerothFriend.LiveState.Port</code> | <code>8377</code> | LiveState TCP port. |
+| <code>AzerothFriend.LiveState.Secret</code> | empty | Shared LiveState authentication secret; required for the listener to start. |
+| <code>AzerothFriend.Rpc.Enable</code> | <code>1</code> | Enables local JSON-RPC administration. |
+| <code>AzerothFriend.Rpc.Port</code> | <code>8378</code> | JSON-RPC HTTP port. |
+| <code>AzerothFriend.Plugins.Enable</code> | <code>1</code> | Loads bridge plugins from <code>tools/plugins/</code>. |
+| <code>AzerothFriend.MultiActionPlan.MaxSteps</code> | <code>5</code> | Maximum steps in a generated plan. |
+| <code>AzerothFriend.Autonomy.Enable</code> | <code>1</code> | Enables autonomous event/tick generation globally. |
+| <code>AzerothFriend.Autonomy.TickSeconds</code> | <code>5</code> | Autonomous idle tick cadence. |
+| <code>AzerothFriend.Autonomy.ThinkingCadence</code> | <code>low</code> | Idle thought cadence tier. |
+| <code>AzerothFriend.Autonomy.HeartbeatSeconds</code> | <code>60</code> | Re-plan heartbeat for unchanged situations. |
+| <code>AzerothFriend.Autonomy.MinimumPlanSeconds</code> | <code>10</code> | Minimum gap between autonomous plans. |
+| <code>AzerothFriend.Goal.AutoGenerate.Enable</code> | <code>1</code> | Initializes empty goals for newly registered companions. |
+| <code>AzerothFriend.LLM.Thinking.Mode</code> | <code>Auto</code> | Controls use of reasoning-capable model settings. |
+| <code>AzerothFriend.LLM.Thinking.Effort</code> | <code>low</code> | Requested reasoning effort. |
+| <code>AzerothFriend.Context.MaxInputTokens</code> | <code>3500</code> | Planner context ceiling used by the bridge. |
+| <code>AzerothFriend.Grind.SearchRadiusYards</code> | <code>60.0</code> | Default ambient grind/roam radius. |
+
+Settings are split between C++ worldserver behavior and Python-bridge behavior. Restart the relevant process after changing a setting that is only read at startup.
 
 ---
 
@@ -555,36 +777,67 @@ Key configuration parameters in `mod_azeroth_friend.conf`:
 
 ### Common Symptoms and Solutions
 
-- Bridge Reports Offline in `.af status`:
-  - Verify `azeroth_friend_bridge.py` is actively running.
-  - Verify MySQL credentials and database names in `mod_azeroth_friend.conf`.
-  - Check whether MySQL is accessible from the bridge host on port 3306.
+**Bridge fails schema verification**
 
-- Actions Queue but the Bot Does Not Move:
-  - Run `.af diag <bot>` in-game to inspect lease state and playerbot AI state.
-  - Ensure the bot is logged into the world and allowlisted in `AzerothFriend.ControlledBots`.
-  - Confirm the companion is not dead, stunned, or incapacitated.
+- Confirm the AzerothFriend character-database base schema and updates are installed.
+- Read the exact startup error before changing tables manually.
+- The bridge explicitly checks the RAM-first context migration at startup.
 
-- Spell Is Unknown or Not Learned:
-  - The companion can only cast spells present in its learned spellbook.
-  - Use `.af catalog` or inspect the bot's spellbook to check learned spell names.
-  - Use explicit spell rank if multiple spells share ambiguous naming (e.g., `.af cast Healing Wave (Rank 2)`).
+**LiveState is offline**
 
-- Addon HUD Shows Transport Offline:
-  - Ensure `AzerothFriend.LiveState.Secret` in `mod_azeroth_friend.conf` matches between the server and Python bridge.
-  - Check that port 8377 is not blocked by a local firewall.
+- Confirm <code>AzerothFriend.LiveState.Enable = 1</code>.
+- Set a non-empty <code>AzerothFriend.LiveState.Secret</code>.
+- Keep host/port aligned between the C++ module and bridge.
+- Check that loopback port <code>8377</code> is not already in use.
 
-- Companion Swaps Targets Too Rapidly:
-  - The cognitive commitment window (`MindsetManager`) prevents rapid task-switching. Check the Mindset tab in `/af debug` to verify commitment latency.
+**RPC CLI cannot connect**
 
-- Addon Windows Positioned Off-Screen:
-  - Type `/af reset` in chat to restore all HUD frames to the center of your screen.
+- Confirm <code>AzerothFriend.Rpc.Enable = 1</code>.
+- Run <code>python3 tools/af_ctl.py health</code>.
+- Verify the bridge is listening on <code>127.0.0.1:8378</code>.
+- RPC is intentionally loopback-only by default.
+
+**Companion is registered but does not act autonomously**
+
+- Check <code>.af autonomy &lt;bot&gt; status</code>.
+- Make sure the companion has a short- or long-term goal.
+- Ensure the bot is not currently claimed.
+- Check <code>AzerothFriend.Autonomy.Enable</code> and allowed modes.
+- Run <code>.af diag &lt;bot&gt;</code> to inspect control and playerbot state.
+
+**Suggested action looks correct but does not execute**
+
+- Suggestions are advisory until dispatched.
+- Inspect Bot API v1 for the exact capability and required parameters.
+- Check the Actions tab for server dispatch/verification results.
+- The server may reject an action because of authority, revision, range, target, cooldown, ownership, or another precondition.
+
+**Spell cannot be resolved**
+
+- The bot must actually know the spell.
+- Confirm Spell DBC/catalog data is available.
+- Try a more specific spell/rank name if the request is ambiguous.
+
+**Addon appears stuck in thinking state or clears too early**
+
+- Update the addon and module together; recent versions changed thinking-lock/debounce behavior and thought timeline handling.
+- Use <code>/af debug</code> to compare client state with bridge/server telemetry.
+
+**Need a quick bridge health snapshot**
+
+~~~bash
+python3 tools/af_ctl.py status
+python3 tools/af_ctl.py health
+~~~
 
 ---
 
 ## License and Credits
 
-- **Module License**: Licensed under the GNU General Public License v2 (GPLv2), compatible with AzerothCore.
-- **AzerothCore**: Open-source MMORPG framework for World of Warcraft 3.3.5a.
-- **mod-playerbots**: Playerbot AI execution framework for AzerothCore.
-- **mod-llm-chatter**: Optional ambient conversation and dialogue companion module.
+- **AzerothCore** — open-source WoW 3.3.5a server framework.
+- **mod-playerbots** — required Playerbot fork/module runtime and physical bot execution layer.
+- **mod-llm-chatter** — optional dialogue/perception integration used for speech delegation and sensory reuse.
+- **agent-wow** — credited in source comments for architectural ideas adapted by the JSON-RPC, plugin, and offline-catalog work.
+- **AzerothFriend contributors** — companion module, Python bridge, addon UI, Bot API integration, planning, goals, memory, and telemetry.
+
+Review the repository and upstream dependency licenses before redistribution.
