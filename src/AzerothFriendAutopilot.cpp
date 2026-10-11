@@ -1,6 +1,7 @@
 #include "AzerothFriendAutopilot.h"
 #include "AzerothFriendAutopilotSchema.h"
 #include "AzerothFriendActionDispatcher.h"
+#include "AzerothFriendAiControl.h"
 #include "AzerothFriendConfig.h"
 #include "AzerothFriendErrands.h"
 #include "AzerothFriendEnvironment.h"
@@ -43,9 +44,16 @@
     #include "PlayerbotAIConfig.h"
     #include "PlayerbotMgr.h"
     #include "RandomPlayerbotMgr.h"
+#if __has_include("PlayerbotRepository.h")
+    #include "PlayerbotRepository.h"
+    #define AF_HAS_PLAYERBOT_REPOSITORY 1
+#else
+    #define AF_HAS_PLAYERBOT_REPOSITORY 0
+#endif
     #define AF_HAS_PLAYERBOTS 1
 #else
     #define AF_HAS_PLAYERBOTS 0
+    #define AF_HAS_PLAYERBOT_REPOSITORY 0
 #endif
 
 #include <algorithm>
@@ -63,12 +71,81 @@ namespace
     enum class Tier : uint8_t { Dormant, Background, Foreground };
     enum class Scope : uint8_t { Range, Zone, Map, World, Always };
 
+    inline std::string Lower(std::string const& s)
+    {
+        std::string out = s;
+        std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) { return std::tolower(c); });
+        return out;
+    }
+
+    inline uint64_t StableHash(uint64_t x)
+    {
+        x += 0x9E3779B97F4A7C15ull;
+        x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+        x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+        return x ^ (x >> 31);
+    }
+
+    inline std::unordered_set<uint32_t> ParseIds(const std::string& text)
+    {
+        std::unordered_set<uint32_t> out;
+        std::stringstream ss(text);
+        std::string token;
+        while (std::getline(ss, token, ','))
+        {
+            token.erase(token.begin(), std::find_if(token.begin(), token.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+            token.erase(std::find_if(token.rbegin(), token.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), token.end());
+            if (!token.empty())
+            {
+                try { out.insert(static_cast<uint32_t>(std::stoul(token))); }
+                catch (...) { LOG_ERROR("module.azerothfriend", "Autopilot: '{}' is not a valid numeric ID.", token); }
+            }
+        }
+        return out;
+    }
+
+    inline std::unordered_set<std::string> ParseNames(const std::string& text)
+    {
+        std::unordered_set<std::string> out;
+        std::stringstream ss(text);
+        std::string token;
+        while (std::getline(ss, token, ','))
+        {
+            token.erase(token.begin(), std::find_if(token.begin(), token.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+            token.erase(std::find_if(token.rbegin(), token.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), token.end());
+            if (!token.empty())
+                out.insert(Lower(token));
+        }
+        return out;
+    }
+
+    inline Scope ParseScope(const std::string& str, Scope fallback)
+    {
+        const std::string s = Lower(str);
+        if (s == "range")  return Scope::Range;
+        if (s == "zone")   return Scope::Zone;
+        if (s == "map")    return Scope::Map;
+        if (s == "world")  return Scope::World;
+        if (s == "always") return Scope::Always;
+        return fallback;
+    }
+
+    inline Tier ParseTier(const std::string& str, Tier fallback)
+    {
+        const std::string s = Lower(str);
+        if (s == "dormant")    return Tier::Dormant;
+        if (s == "background") return Tier::Background;
+        if (s == "foreground") return Tier::Foreground;
+        return fallback;
+    }
+
     struct AutopilotConfig
     {
-        bool     enable                   = true;
+        bool     enable                   = false; // Default safe opt-in
         bool     debug                    = false;
         bool     allowMasterEnroll        = true;
-        uint32_t randomBotPercent         = 100;
+        bool     altBots                  = false;
+        uint32_t randomBotPercent         = 0;     // Default safe opt-in (0%)
         uint32_t minLevel                 = 1;
         uint32_t maxLevel                 = 80;
         uint32_t maxEnrolled              = 0;
@@ -171,6 +248,10 @@ namespace
         uint32_t              lastDeathTime   = 0;
         bool                  corpseRunActive = false;
         uint32_t              corpseRunStart  = 0;
+        bool                  evaluated       = false;
+        bool                  markerOurs      = false;
+        bool                  reviveHeld      = false;
+        uint32_t              teleportDeferredAt = 0;
         AutopilotErrand       currentErrand;
         std::vector<AutopilotErrand> errandQueue;
     };
@@ -178,12 +259,21 @@ namespace
     std::mutex                                g_mutex;
     std::unordered_map<uint64_t, Row>         g_rows;
     std::unordered_map<uint64_t, OnlineState> g_online;
+    std::unordered_set<uint64_t>              g_realOnline;
     std::vector<uint64_t>                     g_sweepRoster;
     size_t                                    g_sweepCursor   = 0;
     uint32_t                                  g_sweepTimer    = 0;
     uint32_t                                  g_flushTimer    = 0;
+    uint32_t                                  g_enrolledCount = 0;
+    uint32_t                                  g_cappedCount   = 0;
 
     uint32_t Now() { return static_cast<uint32_t>(time(nullptr)); }
+
+    std::string Escape(std::string s)
+    {
+        CharacterDatabase.EscapeString(s);
+        return s;
+    }
 
     bool IsBotPlayer(Player* player)
     {
@@ -201,33 +291,80 @@ namespace
 #if !AF_HAS_PLAYERBOTS
     bool IsRealPlayer(Player* player)
     {
-        return player != nullptr;
+        return player != nullptr && !IsBotPlayer(player);
     }
 #endif
+
+    bool InScope(Scope scope, Player* bot, Player* p)
+    {
+        switch (scope)
+        {
+            case Scope::Always:
+            case Scope::World:  return true;
+            case Scope::Map:    return p->GetMapId() == bot->GetMapId();
+            case Scope::Zone:   return p->GetMapId() == bot->GetMapId() && p->GetZoneId() == bot->GetZoneId();
+            case Scope::Range:  return p->GetMapId() == bot->GetMapId() && bot->GetDistance(p) <= g_cfg.foregroundRange;
+        }
+        return false;
+    }
+
+    bool IsCappedSource(const std::string& source)
+    {
+        return source == "random" || source == "guild" || source == "account" || source == "alt";
+    }
+
+    void CountEnrolled(Row const& row, int delta)
+    {
+        if (delta > 0)
+        {
+            ++g_enrolledCount;
+            if (IsCappedSource(row.source))
+                ++g_cappedCount;
+        }
+        else
+        {
+            if (g_enrolledCount > 0)
+                --g_enrolledCount;
+            if (IsCappedSource(row.source) && g_cappedCount > 0)
+                --g_cappedCount;
+        }
+    }
 
     Tier CalculateTier(Player* bot)
     {
         if (!bot || !bot->IsInWorld())
             return Tier::Dormant;
 
-        for (auto const& [guid, player] : ObjectAccessor::GetPlayers())
+        if (!g_cfg.requireRealPlayer)
+            return Tier::Foreground;
+
+        Tier tier = Tier::Dormant;
+        auto raise = [&tier](Tier t) { if (static_cast<uint8_t>(t) > static_cast<uint8_t>(tier)) tier = t; };
+
+        if (g_cfg.backgroundScope == Scope::Always)
+            raise(Tier::Background);
+        if (g_cfg.foregroundScope == Scope::Always)
+            raise(Tier::Foreground);
+
+        for (uint64_t guid : g_realOnline)
         {
-            if (!player || !::IsRealPlayer(player) || !player->IsInWorld())
+            if (tier == Tier::Foreground)
+                break;
+
+            Player* p = ObjectAccessor::FindConnectedPlayer(ObjectGuid(guid));
+            if (!p || !p->IsInWorld())
                 continue;
 
-            if (player->GetMapId() == bot->GetMapId())
-            {
-                if (player->GetZoneId() == bot->GetZoneId())
-                {
-                    if (bot->GetDistance(player) <= g_cfg.foregroundRange)
-                        return Tier::Foreground;
-                    return Tier::Foreground;
-                }
-                return Tier::Background;
-            }
+            if (bot->GetGuildId() && p->GetGuildId() == bot->GetGuildId())
+                raise(Tier::Foreground);
+            else if (InScope(g_cfg.foregroundScope, bot, p))
+                raise(Tier::Foreground);
+            else if (InScope(g_cfg.backgroundScope, bot, p))
+                raise(Tier::Background);
         }
 
-        return g_cfg.requireRealPlayer ? Tier::Dormant : Tier::Background;
+        raise(g_cfg.minimumTier);
+        return tier;
     }
 
     void HandleCorpseRun(Player* bot, OnlineState& state, uint32_t now)
@@ -276,49 +413,368 @@ namespace
 #endif
     }
 
+    bool WithRealPlayer(Player* bot)
+    {
+        if (!bot)
+            return false;
+        if (Group* grp = bot->GetGroup())
+        {
+            for (auto const& slot : grp->GetMemberSlots())
+            {
+                if (Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid))
+                {
+                    if (!IsBotPlayer(member))
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    bool InInstance(Player* bot)
+    {
+        if (!bot)
+            return false;
+        return bot->GetMap() && (bot->GetMap()->Instanceable() || bot->InBattleground());
+    }
+
+    void HandBack(PlayerbotAI* ai, Row* row, OnlineState* ob)
+    {
+#if AF_HAS_PLAYERBOTS
+        if (!ai)
+            return;
+
+        ai->ResetStrategies();
+        Player* bot = ai->GetBot();
+#if AF_HAS_PLAYERBOT_REPOSITORY
+        if (bot && !sRandomPlayerbotMgr.IsRandomBot(bot))
+            PlayerbotRepository::instance().Load(ai);
+#endif
+        if (row && !row->baseline.empty())
+        {
+            AzerothFriendStrategy::RestoreEngine(ai, row->baseline, BOT_STATE_NON_COMBAT);
+            AzerothFriendStrategy::RestoreEngine(ai, row->baseline, BOT_STATE_COMBAT);
+#if AF_HAS_PLAYERBOT_REPOSITORY
+            if (bot && !sRandomPlayerbotMgr.IsRandomBot(bot))
+                PlayerbotRepository::instance().Save(ai);
+#endif
+        }
+
+        if (ob)
+        {
+            if (ob->currentErrand.active)
+                AzerothFriendErrands::StopErrand(ai, ob->currentErrand);
+            ob->currentErrand = AutopilotErrand();
+            ob->errandQueue.clear();
+            if (bot && sRandomPlayerbotMgr.IsRandomBot(bot))
+                sRandomPlayerbotMgr.SetValue(bot->GetGUID().GetCounter(), "revive", 0);
+            ob->reviveHeld = false;
+        }
+#else
+        (void)ai; (void)row; (void)ob;
+#endif
+    }
+
+    std::string EvaluateRules(Player* bot, Row const* row)
+    {
+        if (!g_cfg.enable || !bot)
+            return "";
+
+        // Claimed or leased bots are managed by owner / companion system
+        AzerothFriend::BotControlRecord control;
+        if (sAFLiveState->GetBotControl(bot->GetGUID().GetCounter(), control) &&
+            (!control.bridgeEnabled || control.mode == "claimed"))
+            return "";
+        if (AzerothFriendAiControl::IsLeased(bot))
+            return "";
+
+        if (row && row->mode == MODE_ON)
+            return "command";
+        if (row && row->mode == MODE_OFF)
+            return "";
+
+        const std::string name = Lower(bot->GetName());
+        if (g_cfg.excludeNames.count(name))
+            return "";
+        if (g_cfg.includeNames.count(name))
+            return "name";
+
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot))
+        {
+            if (Player* master = ai->GetMaster())
+            {
+                if (!g_cfg.allowMasterEnroll)
+                    return "";
+                if (row && row->enrolled && row->source == "master")
+                    return "master";
+                return "";
+            }
+        }
+#endif
+
+        const uint32_t level = bot->GetLevel();
+        if (level < g_cfg.minLevel || level > g_cfg.maxLevel)
+            return "";
+
+        if (bot->GetGuildId() && g_cfg.guilds.count(bot->GetGuildId()))
+            return "guild";
+
+        if (bot->GetSession() && g_cfg.accounts.count(bot->GetSession()->GetAccountId()))
+            return "account";
+
+#if AF_HAS_PLAYERBOTS
+        if (sRandomPlayerbotMgr.IsRandomBot(bot))
+        {
+            if (g_cfg.randomBotPercent > 0 &&
+                (StableHash(bot->GetGUID().GetRawValue()) % 100 < g_cfg.randomBotPercent))
+                return "random";
+        }
+        else if (g_cfg.altBots)
+        {
+            return "alt";
+        }
+#else
+        if (g_cfg.randomBotPercent > 0 &&
+            (StableHash(bot->GetGUID().GetRawValue()) % 100 < g_cfg.randomBotPercent))
+            return "random";
+#endif
+
+        return "";
+    }
+
+    void ApplyEnrollment(Player* bot, Row& row, OnlineState& state, const std::string& source, uint32_t now)
+    {
+        const bool wasEnrolled = (row.enrolled != 0);
+        bool want = !source.empty();
+
+        if (want && !wasEnrolled && IsCappedSource(source) &&
+            g_cfg.maxEnrolled > 0 && g_cappedCount >= g_cfg.maxEnrolled)
+        {
+            want = false;
+            if (g_cfg.debug)
+                LOG_INFO("module.azerothfriend", "Autopilot: '{}' matched '{}' but MaxEnrolled ({}) is reached.",
+                         bot->GetName(), source, g_cfg.maxEnrolled);
+        }
+
+        if (want && !wasEnrolled)
+        {
+            row.enrolled   = 1;
+            row.enrolledAt = now;
+            row.source     = source;
+            row.dirty      = true;
+            CountEnrolled(row, 1);
+
+#if AF_HAS_PLAYERBOTS
+            if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+            {
+                // Capture baseline strategies before autopilot changes anything
+                if (row.baseline.empty())
+                {
+                    row.baseline = AzerothFriendStrategy::CaptureStrategies(ai);
+                }
+            }
+#endif
+            AzerothFriendStrategy::AutopilotStrategy_Apply(bot);
+            state.markerOurs = true;
+            AzerothFriendStrategy::SetBotEnrolled(bot->GetGUID().GetRawValue(), true);
+            AzerothFriendProgress::QueueEvent(bot->GetGUID().GetRawValue(), "enroll", "Enrolled into Autopilot (" + source + ")");
+            if (g_cfg.debug)
+                LOG_INFO("module.azerothfriend", "Autopilot: Enrolled '{}' via source '{}'.", bot->GetName(), source);
+        }
+        else if (!want && wasEnrolled)
+        {
+            if (row.mode == MODE_ON && g_cfg.enable)
+                return; // preserve forced command enrollment while globally enabled
+
+            CountEnrolled(row, -1);
+            row.enrolled = 0;
+            row.dirty    = true;
+#if AF_HAS_PLAYERBOTS
+            if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+            {
+                HandBack(ai, &row, &state);
+                row.baseline.clear();
+            }
+#endif
+            if (state.markerOurs)
+            {
+                AzerothFriendStrategy::AutopilotStrategy_Remove(bot);
+                state.markerOurs = false;
+            }
+            AzerothFriendStrategy::SetBotEnrolled(bot->GetGUID().GetRawValue(), false);
+            AzerothFriendProgress::QueueEvent(bot->GetGUID().GetRawValue(), "unenroll", "Unenrolled from Autopilot");
+            if (g_cfg.debug)
+                LOG_INFO("module.azerothfriend", "Autopilot: Unenrolled '{}'.", bot->GetName());
+        }
+        state.evaluated = true;
+    }
+
     void SweepBot(Player* bot, uint32_t now)
     {
         if (!bot || !bot->IsInWorld())
             return;
-        AzerothFriend::BotControlRecord control;
-        if (sAFLiveState->GetBotControl(bot->GetGUID().GetCounter(), control) &&
-            (!control.bridgeEnabled || control.mode == "claimed"))
-            return; // manual owner control supersedes imported background behavior
+
         const uint64_t guid = bot->GetGUID().GetRawValue();
+        const uint32_t lowGuid = bot->GetGUID().GetCounter();
+
+        // 1. Ownership arbitration: manual owner claim, companion lease, or disabled bridge
+        AzerothFriend::BotControlRecord control;
+        const bool hasControl = sAFLiveState->GetBotControl(lowGuid, control);
+        const bool isClaimed = (hasControl && (!control.bridgeEnabled || control.mode == "claimed"));
+        const bool isLeased = AzerothFriendAiControl::IsLeased(bot);
+
         std::lock_guard<std::mutex> lock(g_mutex);
 
         Row& row = g_rows[guid];
         row.botGuid = guid;
         OnlineState& state = g_online[guid];
 
+        if (isClaimed || isLeased)
+        {
+            if (row.enrolled)
+            {
+                CountEnrolled(row, -1);
+                row.enrolled = 0;
+                row.dirty = true;
+#if AF_HAS_PLAYERBOTS
+                if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+                {
+                    HandBack(ai, &row, &state);
+                    row.baseline.clear();
+                }
+#endif
+                if (state.markerOurs)
+                {
+                    AzerothFriendStrategy::AutopilotStrategy_Remove(bot);
+                    state.markerOurs = false;
+                }
+                AzerothFriendStrategy::SetBotEnrolled(guid, false);
+                AzerothFriendProgress::QueueEvent(guid, "unenroll", "Handed back to owner / companion lease");
+            }
+            state.evaluated = true;
+            return;
+        }
+
         if (row.mode == MODE_OFF)
         {
             if (row.enrolled)
             {
+                CountEnrolled(row, -1);
                 row.enrolled = 0;
                 row.dirty = true;
-                AzerothFriendStrategy::AutopilotStrategy_Remove(bot);
+#if AF_HAS_PLAYERBOTS
+                if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+                {
+                    HandBack(ai, &row, &state);
+                    row.baseline.clear();
+                }
+#endif
+                if (state.markerOurs)
+                {
+                    AzerothFriendStrategy::AutopilotStrategy_Remove(bot);
+                    state.markerOurs = false;
+                }
+                AzerothFriendStrategy::SetBotEnrolled(guid, false);
+                AzerothFriendProgress::QueueEvent(guid, "unenroll", "Unenrolled from Autopilot (mode OFF)");
             }
+            state.evaluated = true;
             return;
         }
 
-        if (row.mode == MODE_ON || (!row.enrolled && g_cfg.enable))
+        if (!state.evaluated)
         {
-            if (!row.enrolled)
-            {
-                row.enrolled   = 1;
-                row.enrolledAt = now;
-                row.source     = (row.mode == MODE_ON) ? "command" : "rule";
-                row.dirty      = true;
-                AzerothFriendStrategy::AutopilotStrategy_Apply(bot);
-                AzerothFriendProgress::QueueEvent(guid, "enroll", "Enrolled into Autopilot");
-            }
+            ApplyEnrollment(bot, row, state, EvaluateRules(bot, &row), now);
         }
 
         if (!row.enrolled)
             return;
 
         state.tier = CalculateTier(bot);
+
+        // 2. Reassert marker strategy if playerbots reset engine strategies
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+        {
+            const bool ncMissing = !ai->HasStrategy(AUTOPILOT_STRATEGY_NAME, BOT_STATE_NON_COMBAT);
+            const bool coMissing = !ai->HasStrategy(AUTOPILOT_STRATEGY_NAME, BOT_STATE_COMBAT);
+            const bool deadMissing = !ai->HasStrategy(AUTOPILOT_STRATEGY_NAME, BOT_STATE_DEAD);
+
+            if (ncMissing || coMissing || deadMissing)
+            {
+                AzerothFriendStrategy::AutopilotStrategy_Apply(bot);
+                state.markerOurs = true;
+            }
+
+            // Diary only (Autopilot.Control = 0): restore any model modifications
+            if (!g_cfg.control)
+            {
+                if (!row.baseline.empty())
+                {
+                    HandBack(ai, &row, &state);
+                    AzerothFriendStrategy::AutopilotStrategy_Apply(bot);
+                    row.baseline.clear();
+                    row.dirty = true;
+                }
+                return;
+            }
+
+            // Taxi cheat removal for random bots under anti-handouts
+            if (g_cfg.noHandouts && bot->isTaxiCheater())
+                bot->SetTaxiCheater(false);
+
+            // Group / instance arbitration: in a real player's group or dungeon,
+            // movement and errands yield to the party
+            const bool withRealPlayer = WithRealPlayer(bot);
+            const bool inInstance = InInstance(bot);
+            if (withRealPlayer || inInstance)
+            {
+                if (state.currentErrand.active)
+                {
+                    AzerothFriendErrands::StopErrand(ai, state.currentErrand);
+                    state.errandQueue.clear();
+                }
+            }
+            else
+            {
+                // Solo in open world: suppress competing autonomous controllers
+                for (const char* key : { "new rpg", "rpg", "travel" })
+                {
+                    if (ai->HasStrategy(key, BOT_STATE_NON_COMBAT))
+                        ai->ChangeStrategy(std::string("-") + key, BOT_STATE_NON_COMBAT);
+                }
+            }
+
+            // Periodic teleports and randomize holds
+            if (sRandomPlayerbotMgr.IsRandomBot(bot))
+            {
+                if (!state.teleportDeferredAt || now - state.teleportDeferredAt >= 3600)
+                {
+                    if (g_cfg.noTeleport)
+                        sRandomPlayerbotMgr.ScheduleTeleport(lowGuid, 7200);
+                    if (g_cfg.noRandomize)
+                        sRandomPlayerbotMgr.SetValue(lowGuid, "randomize", 1);
+                    if (g_cfg.keepOnline)
+                        sRandomPlayerbotMgr.SetValue(lowGuid, "add", 1);
+                    state.teleportDeferredAt = now;
+                }
+
+                if (g_cfg.noTeleport && !bot->IsAlive() && !bot->InBattleground())
+                {
+                    if (!state.reviveHeld)
+                    {
+                        sRandomPlayerbotMgr.SetValue(lowGuid, "revive", 1);
+                        state.reviveHeld = true;
+                    }
+                }
+                else if (state.reviveHeld && bot->IsAlive())
+                {
+                    sRandomPlayerbotMgr.SetValue(lowGuid, "revive", 0);
+                    state.reviveHeld = false;
+                }
+            }
+        }
+#endif
 
         if (!bot->IsAlive())
         {
@@ -341,27 +797,90 @@ namespace
     }
 }
 
+void Autopilot_Off()
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (auto& [guid, ob] : g_online)
+    {
+        Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(guid));
+        if (!bot || !bot->IsInWorld())
+            continue;
+
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+        {
+            auto it = g_rows.find(guid);
+            if (it != g_rows.end() && (!it->second.baseline.empty() || ob.currentErrand.active || ob.reviveHeld || !bot->IsAlive()))
+            {
+                HandBack(ai, &it->second, &ob);
+                it->second.baseline.clear();
+                it->second.dirty = true;
+            }
+            if (ob.markerOurs)
+            {
+                AzerothFriendStrategy::AutopilotStrategy_Remove(bot);
+                ob.markerOurs = false;
+            }
+        }
+#endif
+        AzerothFriendStrategy::SetBotEnrolled(guid, false);
+        ob.evaluated = false;
+    }
+    AzerothFriendStrategy::ClearEnrolledBots();
+    LOG_INFO("module.azerothfriend", "Autopilot is off; bots handed back to native playerbots.");
+}
+
 void Autopilot_LoadConfig()
 {
     AutopilotConfig c;
-    c.enable                   = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.Enable", true);
+    c.enable                   = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.Enable", false);
     c.debug                    = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.Debug", false);
     c.allowMasterEnroll        = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.AllowMasterEnroll", true);
-    c.randomBotPercent         = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.RandomBotPercent", 100);
+    c.altBots                  = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.Select.AltBots", false);
+    c.randomBotPercent         = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.RandomBotPercent", 0));
     c.minLevel                 = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.MinLevel", 1);
     c.maxLevel                 = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.MaxLevel", 80);
     c.maxEnrolled              = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.MaxEnrolled", 0);
-    c.sweepIntervalMs          = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.SweepIntervalMs", 1000);
-    c.botsPerSweep             = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.BotsPerSweep", 25);
-    c.snapshotIntervalMinutes  = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.SnapshotIntervalMinutes", 10);
-    c.flushIntervalSeconds     = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.FlushIntervalSeconds", 60);
+
+    c.guilds                   = ParseIds(sConfigMgr->GetOption<std::string>("AzerothFriend.Autopilot.Select.Guilds", ""));
+    c.accounts                 = ParseIds(sConfigMgr->GetOption<std::string>("AzerothFriend.Autopilot.Select.Accounts", ""));
+    c.includeNames             = ParseNames(sConfigMgr->GetOption<std::string>("AzerothFriend.Autopilot.Select.Include", ""));
+    c.excludeNames             = ParseNames(sConfigMgr->GetOption<std::string>("AzerothFriend.Autopilot.Select.Exclude", ""));
+
+    c.sweepIntervalMs          = std::max<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.SweepIntervalMs", 1000));
+    c.botsPerSweep             = std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.BotsPerSweep", 25));
+    c.snapshotIntervalMinutes  = std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.SnapshotIntervalMinutes", 10));
+    c.flushIntervalSeconds     = std::max<uint32_t>(5, sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.FlushIntervalSeconds", 60));
+    c.snapshotRetention        = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.SnapshotRetention", 500);
+    c.eventRetention           = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.EventRetention", 300);
+
     c.control                  = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.Control", true);
     c.noTeleport               = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.NoTeleport", true);
     c.noRandomize              = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.NoRandomize", true);
     c.noHandouts               = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.NoHandouts", true);
     c.keepOnline               = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.KeepOnline", true);
-    c.corpseRunMinutes         = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.CorpseRunMinutes", 10);
+    c.corpseRunMinutes         = std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("AzerothFriend.Autopilot.CorpseRunMinutes", 10));
+
+    c.foregroundRange          = sConfigMgr->GetOption<float>("AzerothFriend.Autopilot.ForegroundRange", 100.0f);
+    c.requireRealPlayer        = sConfigMgr->GetOption<bool>("AzerothFriend.Autopilot.RequireRealPlayer", false);
+    c.foregroundScope          = ParseScope(sConfigMgr->GetOption<std::string>("AzerothFriend.Autopilot.ForegroundScope", "range"), Scope::Range);
+    c.backgroundScope          = ParseScope(sConfigMgr->GetOption<std::string>("AzerothFriend.Autopilot.BackgroundScope", "zone"), Scope::Zone);
+    c.minimumTier              = ParseTier(sConfigMgr->GetOption<std::string>("AzerothFriend.Autopilot.MinimumTier", "dormant"), Tier::Dormant);
+
+    const bool wasEnabled = g_cfg.enable;
     g_cfg = c;
+
+    AzerothFriendStrategy::SetNoHandouts(g_cfg.noHandouts);
+    AzerothFriendStrategy::SetModelGroups(g_cfg.groups);
+
+    if (wasEnabled && !g_cfg.enable)
+    {
+        Autopilot_Off();
+    }
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (auto& [guid, state] : g_online)
+        state.evaluated = false;
 }
 
 void Autopilot_Load()
@@ -372,31 +891,72 @@ void Autopilot_Load()
 
     std::lock_guard<std::mutex> lock(g_mutex);
     g_rows.clear();
+    g_enrolledCount = 0;
+    g_cappedCount   = 0;
 
     if (QueryResult result = CharacterDatabase.Query(
-            "SELECT bot_guid, mode, enrolled, source, style, outlook, doing, doing_since, goal_kind, goal_target, goal_value "
+            "SELECT bot_guid, mode, enrolled, source, style, outlook, profile, "
+            "kills_total, deaths_total, quests_total, dungeons_total, "
+            "doing, doing_since, decided_by, strategies, last_results, "
+            "goal_kind, goal_target, goal_target_id, goal_value, goal_baseline, "
+            "goal_set_at, goal_text, last_reason, baseline, "
+            "plan_until, last_plan_at, enrolled_at, updated_at "
             "FROM azeroth_friend_autopilot"))
     {
         do
         {
             Field* f = result->Fetch();
             Row r;
-            r.botGuid      = f[0].Get<uint64>();
-            r.mode         = f[1].Get<uint8>();
-            r.enrolled     = f[2].Get<uint8>();
-            r.source       = f[3].Get<std::string>();
-            r.style        = f[4].Get<std::string>();
-            r.outlook      = f[5].Get<std::string>();
-            r.doing        = f[6].Get<std::string>();
-            r.doingSince   = f[7].Get<uint32>();
-            r.goalKind     = f[8].Get<std::string>();
-            r.goalTarget   = f[9].Get<std::string>();
-            r.goalValue    = f[10].Get<uint32>();
+            r.botGuid       = f[0].Get<uint64>();
+            r.mode          = f[1].Get<uint8>();
+            r.enrolled      = f[2].Get<uint8>();
+            r.source        = f[3].Get<std::string>();
+            r.style         = f[4].Get<std::string>();
+            r.outlook       = f[5].Get<std::string>();
+            r.profile       = f[6].Get<std::string>();
+            r.killsTotal    = f[7].Get<uint32>();
+            r.deathsTotal   = f[8].Get<uint32>();
+            r.questsTotal   = f[9].Get<uint32>();
+            r.dungeonsTotal = f[10].Get<uint32>();
+            r.doing         = f[11].Get<std::string>();
+            r.doingSince    = f[12].Get<uint32>();
+            r.decidedBy     = f[13].Get<std::string>();
+            r.strategies    = f[14].Get<std::string>();
+            r.lastResults   = f[15].Get<std::string>();
+            r.goalKind      = f[16].Get<std::string>();
+            r.goalTarget    = f[17].Get<std::string>();
+            r.goalTargetId  = f[18].Get<uint32>();
+            r.goalValue     = f[19].Get<uint32>();
+            r.goalBaseline  = f[20].Get<uint32>();
+            r.goalSetAt     = f[21].Get<uint32>();
+            r.goalText      = f[22].Get<std::string>();
+            r.lastReason    = f[23].Get<std::string>();
+            r.baseline      = f[24].Get<std::string>();
+            r.planUntil     = f[25].Get<uint32>();
+            r.lastPlanAt    = f[26].Get<uint32>();
+            r.enrolledAt    = f[27].Get<uint32>();
+            r.updatedAt     = f[28].Get<uint32>();
+            r.dirty         = false;
+
+            if (r.enrolled)
+            {
+                ++g_enrolledCount;
+                if (IsCappedSource(r.source))
+                    ++g_cappedCount;
+            }
             g_rows[r.botGuid] = r;
         } while (result->NextRow());
     }
 
-    LOG_INFO("module.azerothfriend", "Autopilot loaded {} rows.", g_rows.size());
+    g_realOnline.clear();
+    for (auto const& [guid, player] : ObjectAccessor::GetPlayers())
+    {
+        if (player && !IsBotPlayer(player) && player->IsInWorld())
+            g_realOnline.insert(guid.GetRawValue());
+    }
+
+    LOG_INFO("module.azerothfriend", "Autopilot loaded {} rows ({} enrolled, {} capped).",
+             g_rows.size(), g_enrolledCount, g_cappedCount);
 }
 
 void Autopilot_Update(uint32_t diff)
@@ -441,7 +1001,11 @@ void Autopilot_Update(uint32_t diff)
 void Autopilot_SaveAll()
 {
     std::lock_guard<std::mutex> lock(g_mutex);
+    std::vector<uint64_t> dirtyGuids;
+    dirtyGuids.reserve(g_rows.size());
+
     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+    bool hasUpdates = false;
 
     for (auto& [guid, r] : g_rows)
     {
@@ -449,17 +1013,83 @@ void Autopilot_SaveAll()
             continue;
 
         std::string sql = SafeFormat(
-            "REPLACE INTO azeroth_friend_autopilot (bot_guid, mode, enrolled, source, style, outlook, "
-            "doing, doing_since, goal_kind, goal_target, goal_value, enrolled_at, updated_at) "
-            "VALUES ({}, {}, {}, '{}', '{}', '{}', '{}', {}, '{}', '{}', {}, {}, {})",
-            r.botGuid, uint32_t(r.mode), uint32_t(r.enrolled), r.source, r.style, r.outlook,
-            r.doing, r.doingSince, r.goalKind, r.goalTarget, r.goalValue, r.enrolledAt, Now());
+            "INSERT INTO azeroth_friend_autopilot ("
+            "bot_guid, mode, enrolled, source, style, outlook, profile, "
+            "kills_total, deaths_total, quests_total, dungeons_total, "
+            "doing, doing_since, decided_by, strategies, last_results, "
+            "goal_kind, goal_target, goal_target_id, goal_value, goal_baseline, "
+            "goal_set_at, goal_text, last_reason, baseline, "
+            "plan_until, last_plan_at, enrolled_at, updated_at"
+            ") VALUES ("
+            "{}, {}, {}, '{}', '{}', '{}', '{}', "
+            "{}, {}, {}, {}, "
+            "'{}', {}, '{}', '{}', '{}', "
+            "'{}', '{}', {}, {}, {}, "
+            "{}, '{}', '{}', '{}', "
+            "{}, {}, {}, {}"
+            ") ON DUPLICATE KEY UPDATE "
+            "mode = VALUES(mode), "
+            "enrolled = VALUES(enrolled), "
+            "source = VALUES(source), "
+            "style = VALUES(style), "
+            "outlook = VALUES(outlook), "
+            "profile = VALUES(profile), "
+            "kills_total = VALUES(kills_total), "
+            "deaths_total = VALUES(deaths_total), "
+            "quests_total = VALUES(quests_total), "
+            "dungeons_total = VALUES(dungeons_total), "
+            "doing = VALUES(doing), "
+            "doing_since = VALUES(doing_since), "
+            "decided_by = VALUES(decided_by), "
+            "strategies = VALUES(strategies), "
+            "last_results = VALUES(last_results), "
+            "goal_kind = VALUES(goal_kind), "
+            "goal_target = VALUES(goal_target), "
+            "goal_target_id = VALUES(goal_target_id), "
+            "goal_value = VALUES(goal_value), "
+            "goal_baseline = VALUES(goal_baseline), "
+            "goal_set_at = VALUES(goal_set_at), "
+            "goal_text = VALUES(goal_text), "
+            "last_reason = VALUES(last_reason), "
+            "baseline = VALUES(baseline), "
+            "plan_until = VALUES(plan_until), "
+            "last_plan_at = VALUES(last_plan_at), "
+            "enrolled_at = VALUES(enrolled_at), "
+            "updated_at = VALUES(updated_at)",
+            r.botGuid, uint32_t(r.mode), uint32_t(r.enrolled),
+            Escape(Utf8Truncate(r.source, 32)),
+            Escape(Utf8Truncate(r.style, 64)),
+            Escape(Utf8Truncate(r.outlook, 32)),
+            Escape(SanitizeUTF8(r.profile)),
+            r.killsTotal, r.deathsTotal, r.questsTotal, r.dungeonsTotal,
+            Escape(Utf8Truncate(r.doing, 64)), r.doingSince,
+            Escape(Utf8Truncate(r.decidedBy, 16)),
+            Escape(Utf8Truncate(r.strategies, 2000)),
+            Escape(Utf8Truncate(r.lastResults, 2000)),
+            Escape(Utf8Truncate(r.goalKind, 24)),
+            Escape(Utf8Truncate(r.goalTarget, 64)),
+            r.goalTargetId, r.goalValue, r.goalBaseline,
+            r.goalSetAt,
+            Escape(Utf8Truncate(r.goalText, 255)),
+            Escape(Utf8Truncate(r.lastReason, 255)),
+            Escape(Utf8Truncate(r.baseline, 4000)),
+            r.planUntil, r.lastPlanAt, r.enrolledAt, Now());
 
         trans->Append(sql.c_str());
-        r.dirty = false;
+        dirtyGuids.push_back(guid);
+        hasUpdates = true;
     }
 
-    CharacterDatabase.CommitTransaction(trans);
+    if (hasUpdates)
+    {
+        CharacterDatabase.CommitTransaction(trans);
+        for (uint64_t guid : dirtyGuids)
+        {
+            auto it = g_rows.find(guid);
+            if (it != g_rows.end())
+                it->second.dirty = false;
+        }
+    }
 }
 
 bool Autopilot_IsActive()
@@ -472,6 +1102,8 @@ std::vector<std::string> Autopilot_InactiveReasons()
     std::vector<std::string> reasons;
     if (!g_cfg.enable)
         reasons.push_back("AzerothFriend.Autopilot.Enable is false");
+    if (g_cfg.randomBotPercent == 0 && g_cfg.includeNames.empty() && g_cfg.guilds.empty() && g_cfg.accounts.empty())
+        reasons.push_back("No bots eligible by rules (RandomBotPercent=0 and no include filters)");
     return reasons;
 }
 
@@ -801,18 +1433,16 @@ bool Autopilot_MonitorCommand(Player* gm, const std::string& sub, const std::str
     if (sub == "on")
     {
         r.mode = MODE_ON;
-        r.enrolled = 1;
-        r.dirty = true;
-        AzerothFriendStrategy::AutopilotStrategy_Apply(bot);
+        OnlineState& state = g_online[guid];
+        ApplyEnrollment(bot, r, state, "command", Now());
         ChatHandler(gm->GetSession()).PSendSysMessage("Autopilot forced ON for %s.", bot->GetName().c_str());
         return true;
     }
     else if (sub == "off")
     {
         r.mode = MODE_OFF;
-        r.enrolled = 0;
-        r.dirty = true;
-        AzerothFriendStrategy::AutopilotStrategy_Remove(bot);
+        OnlineState& state = g_online[guid];
+        ApplyEnrollment(bot, r, state, "", Now());
         ChatHandler(gm->GetSession()).PSendSysMessage("Autopilot forced OFF for %s.", bot->GetName().c_str());
         return true;
     }
@@ -845,13 +1475,45 @@ public:
         auto it = g_rows.find(guid);
         if (it == g_rows.end() || !it->second.enrolled)
         {
-            handler->PSendSysMessage("%s is NOT enrolled in Autopilot.", bot->GetName().c_str());
+            std::string reason = "NOT enrolled in Autopilot";
+            if (!g_cfg.enable)
+                reason += " (Autopilot is globally disabled)";
+            else if (it != g_rows.end() && it->second.mode == MODE_OFF)
+                reason += " (mode forced OFF by operator)";
+            else
+            {
+                AzerothFriend::BotControlRecord control;
+                if (sAFLiveState->GetBotControl(bot->GetGUID().GetCounter(), control) &&
+                    (!control.bridgeEnabled || control.mode == "claimed"))
+                    reason += " (claimed by owner / manual control)";
+                else
+                {
+                    std::string eligibleSource = EvaluateRules(bot, it != g_rows.end() ? &it->second : nullptr);
+                    if (eligibleSource.empty())
+                        reason += " (not eligible under current level/percentage/filters)";
+                    else
+                        reason += " (eligible via '" + eligibleSource + "', awaiting evaluation or capped)";
+                }
+            }
+            handler->PSendSysMessage("%s is %s.", bot->GetName().c_str(), reason.c_str());
             return true;
         }
 
         const Row& r = it->second;
-        handler->PSendSysMessage("Autopilot [%s]: Doing '%s', Goal '%s', Mode %u",
-                                 bot->GetName().c_str(), r.doing.c_str(), r.goalText.c_str(), r.mode);
+        auto onIt = g_online.find(guid);
+        std::string tierStr = "dormant";
+        if (onIt != g_online.end())
+        {
+            switch (onIt->second.tier)
+            {
+                case Tier::Foreground: tierStr = "foreground"; break;
+                case Tier::Background: tierStr = "background"; break;
+                default:               tierStr = "dormant";    break;
+            }
+        }
+        handler->PSendSysMessage("Autopilot [%s]: Enrolled (source: '%s', mode: %u, tier: %s), Doing '%s', Goal '%s'",
+                                 bot->GetName().c_str(), r.source.c_str(), r.mode, tierStr.c_str(),
+                                 r.doing.c_str(), r.goalText.c_str());
         return true;
     }
 
@@ -869,9 +1531,8 @@ public:
         Row& r = g_rows[guid];
         r.botGuid = guid;
         r.mode = MODE_ON;
-        r.enrolled = 1;
-        r.dirty = true;
-        AzerothFriendStrategy::AutopilotStrategy_Apply(bot);
+        OnlineState& state = g_online[guid];
+        ApplyEnrollment(bot, r, state, "command", Now());
         handler->PSendSysMessage("Autopilot forced ON for %s.", bot->GetName().c_str());
         return true;
     }
@@ -890,9 +1551,8 @@ public:
         Row& r = g_rows[guid];
         r.botGuid = guid;
         r.mode = MODE_OFF;
-        r.enrolled = 0;
-        r.dirty = true;
-        AzerothFriendStrategy::AutopilotStrategy_Remove(bot);
+        OnlineState& state = g_online[guid];
+        ApplyEnrollment(bot, r, state, "", Now());
         handler->PSendSysMessage("Autopilot forced OFF for %s.", bot->GetName().c_str());
         return true;
     }
@@ -906,13 +1566,15 @@ public:
             if (!r.enrolled)
                 continue;
             Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(guid));
-            handler->PSendSysMessage("- %s (L%u): %s",
+            handler->PSendSysMessage("- %s (L%u, source: %s): %s",
                                      bot ? bot->GetName().c_str() : "Offline",
                                      bot ? bot->GetLevel() : 0,
+                                     r.source.c_str(),
                                      r.doing.c_str());
             ++count;
         }
-        handler->PSendSysMessage("Total enrolled bots: %u", count);
+        handler->PSendSysMessage("Total enrolled bots: %u (Capped quota: %u / %u)",
+                                 count, g_cappedCount, g_cfg.maxEnrolled);
         return true;
     }
 };
@@ -935,22 +1597,44 @@ Acore::ChatCommands::ChatCommandTable const& Autopilot_CommandTable()
 
 AutopilotPlayerScript::AutopilotPlayerScript()
     : PlayerScript("AutopilotPlayerScript",
-                   { PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_CREATURE_KILL,
-                     PLAYERHOOK_ON_PLAYER_JUST_DIED, PLAYERHOOK_ON_LEVEL_CHANGED })
+                   { PLAYERHOOK_ON_LOGIN,
+                     PLAYERHOOK_ON_LOGOUT,
+                     PLAYERHOOK_ON_CREATURE_KILL,
+                     PLAYERHOOK_ON_PVP_KILL,
+                     PLAYERHOOK_ON_PLAYER_JUST_DIED,
+                     PLAYERHOOK_ON_PLAYER_COMPLETE_QUEST,
+                     PLAYERHOOK_ON_LEVEL_CHANGED,
+                     PLAYERHOOK_ON_STORE_NEW_ITEM,
+                     PLAYERHOOK_ON_ACHI_COMPLETE,
+                     PLAYERHOOK_ON_DELETE_FROM_DB })
 {
 }
 
 void AutopilotPlayerScript::OnPlayerLogin(Player* player)
 {
-    if (!player || !IsBotPlayer(player))
+    if (!player)
         return;
 
     const uint64_t guid = player->GetGUID().GetRawValue();
     std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (!IsBotPlayer(player))
+    {
+        g_realOnline.insert(guid);
+        return;
+    }
+
+    OnlineState& state = g_online[guid];
+    state = OnlineState();
+    state.evaluated = false;
+
     auto it = g_rows.find(guid);
     if (it != g_rows.end() && it->second.enrolled)
     {
         AzerothFriendStrategy::AutopilotStrategy_Apply(player);
+        state.markerOurs = true;
+        AzerothFriendStrategy::SetBotEnrolled(guid, true);
+        state.evaluated = true;
     }
 }
 
@@ -961,6 +1645,24 @@ void AutopilotPlayerScript::OnPlayerLogout(Player* player)
 
     const uint64_t guid = player->GetGUID().GetRawValue();
     std::lock_guard<std::mutex> lock(g_mutex);
+
+    if (IsBotPlayer(player))
+    {
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player))
+        {
+            auto it = g_rows.find(guid);
+            auto onIt = g_online.find(guid);
+            if (it != g_rows.end() && onIt != g_online.end() && it->second.enrolled)
+            {
+                HandBack(ai, &it->second, &onIt->second);
+            }
+        }
+#endif
+        AzerothFriendStrategy::SetBotEnrolled(guid, false);
+    }
+
+    g_realOnline.erase(guid);
     g_online.erase(guid);
 }
 
@@ -1039,6 +1741,10 @@ void AutopilotPlayerScript::OnPlayerLevelChanged(Player* player, uint8 oldLevel)
         it->second.dirty = true;
         AzerothFriendProgress::QueueEvent(guid, "levelup", SafeFormat("Level {} -> {}", oldLevel, player->GetLevel()));
     }
+
+    auto onIt = g_online.find(guid);
+    if (onIt != g_online.end())
+        onIt->second.evaluated = false; // Trigger re-evaluation against minLevel / maxLevel on next sweep
 }
 
 void AutopilotPlayerScript::OnPlayerStoreNewItem(Player* player, Item* item, uint32 count)
@@ -1058,9 +1764,23 @@ void AutopilotPlayerScript::OnPlayerAchievementComplete(Player* player, Achievem
 
 void AutopilotPlayerScript::OnPlayerDeleteFromDB(CharacterDatabaseTransaction trans, uint32 lowGuid)
 {
-    trans->Append(SafeFormat("DELETE FROM azeroth_friend_autopilot WHERE bot_guid = {}", lowGuid).c_str());
-    trans->Append(SafeFormat("DELETE FROM azeroth_friend_autopilot_snapshots WHERE bot_guid = {}", lowGuid).c_str());
-    trans->Append(SafeFormat("DELETE FROM azeroth_friend_autopilot_events WHERE bot_guid = {}", lowGuid).c_str());
+    ObjectGuid rawGuid = ObjectGuid::Create<HighGuid::Player>(lowGuid);
+    uint64 raw = rawGuid.GetRawValue();
+
+    trans->Append(SafeFormat("DELETE FROM azeroth_friend_autopilot WHERE bot_guid = {} OR bot_guid = {}", raw, lowGuid).c_str());
+    trans->Append(SafeFormat("DELETE FROM azeroth_friend_autopilot_snapshots WHERE bot_guid = {} OR bot_guid = {}", raw, lowGuid).c_str());
+    trans->Append(SafeFormat("DELETE FROM azeroth_friend_autopilot_events WHERE bot_guid = {} OR bot_guid = {}", raw, lowGuid).c_str());
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_rows.erase(raw);
+    g_rows.erase(lowGuid);
+    g_online.erase(raw);
+    g_online.erase(lowGuid);
+    g_realOnline.erase(raw);
+    g_realOnline.erase(lowGuid);
+
+    AzerothFriendStrategy::SetBotEnrolled(raw, false);
+    AzerothFriendStrategy::SetBotEnrolled(lowGuid, false);
 }
 
 AutopilotGuildScript::AutopilotGuildScript() : GuildScript("AutopilotGuildScript") { }

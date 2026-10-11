@@ -577,6 +577,8 @@ void AzerothFriendWorldScript::OnUpdate(uint32 diff)
 
 void AzerothFriendWorldScript::OnShutdown()
 {
+    // Hand back all enrolled autopilot bots to native playerbots
+    Autopilot_Off();
     Autopilot_SaveAll();
 
     // Flush nothing to the socket: the bridge treats a closed transport as stale

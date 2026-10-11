@@ -833,9 +833,9 @@ The full authoritative list is <code>conf/mod_azeroth_friend.conf.dist</code>. T
 | <code>AzerothFriend.LLM.Thinking.Effort</code> | <code>low</code> | Requested reasoning effort. |
 | <code>AzerothFriend.Context.MaxInputTokens</code> | <code>3500</code> | Planner context ceiling used by the bridge. |
 | <code>AzerothFriend.Grind.SearchRadiusYards</code> | <code>60.0</code> | Default ambient grind/roam radius. |
-| <code>AzerothFriend.Autopilot.Enable</code> | <code>1</code> | Enables autonomous world autopilot subsystem. |
+| <code>AzerothFriend.Autopilot.Enable</code> | <code>0</code> | Enables autonomous world autopilot subsystem (default: disabled/opt-in). |
 | <code>AzerothFriend.Autopilot.AllowMasterEnroll</code> | <code>1</code> | Allows bot owners to enroll companions via <code>.af autopilot on</code>. |
-| <code>AzerothFriend.Autopilot.RandomBotPercent</code> | <code>100</code> | Percentage of random bots enrolled into autopilot by default. |
+| <code>AzerothFriend.Autopilot.RandomBotPercent</code> | <code>0</code> | Percentage of eligible random bots enrolled by default (default: 0%). |
 | <code>AzerothFriend.Autopilot.SweepIntervalMs</code> | <code>1000</code> | Autopilot evaluation loop interval in milliseconds. |
 | <code>AzerothFriend.Buff.Enable</code> | <code>1</code> | Enables passer-by buffing from learned spellbook. |
 | <code>AzerothFriend.Buff.Range</code> | <code>25.0</code> | Friendly search radius for passer-by buffing. |

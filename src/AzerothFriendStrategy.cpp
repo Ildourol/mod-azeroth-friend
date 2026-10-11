@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <sstream>
 #include <unordered_set>
 #include <vector>
 
@@ -40,10 +41,19 @@ namespace
     std::mutex                   g_travelMutex;
     std::unordered_set<uint64_t> g_travelling;
 
+    std::mutex                   g_enrolledMutex;
+    std::unordered_set<uint64_t> g_enrolledBots;
+
     bool IsTravelling(Player* bot)
     {
         std::lock_guard<std::mutex> lock(g_travelMutex);
         return g_travelling.count(bot->GetGUID().GetRawValue()) > 0;
+    }
+
+    bool IsBotEnrolledInternal(uint64_t botGuid)
+    {
+        std::lock_guard<std::mutex> lock(g_enrolledMutex);
+        return g_enrolledBots.count(botGuid) > 0;
     }
 
     class AutopilotHoldMultiplier : public Multiplier
@@ -55,12 +65,20 @@ namespace
         {
             if (!action)
                 return 1.0f;
+
+            Player* bot = botAI->GetBot();
+            if (!bot)
+                return 1.0f;
+
+            // Per-bot enrollment check: only enrolled bots are subject to hold multipliers
+            if (!IsBotEnrolledInternal(bot->GetGUID().GetRawValue()))
+                return 1.0f;
+
             const std::string name = action->getName();
 
             if (name == "attack anything" || name == "move random")
             {
-                Player* bot = botAI->GetBot();
-                return bot && IsTravelling(bot) ? 0.0f : 1.0f;
+                return IsTravelling(bot) ? 0.0f : 1.0f;
             }
 
             if (g_modelGroups.load(std::memory_order_relaxed) &&
@@ -76,8 +94,7 @@ namespace
 
             if (name == "auto release" || name == "release" || name == "spirit healer")
             {
-                Player* bot = botAI->GetBot();
-                if (bot && !bot->GetGroup() && !bot->InBattleground() && bot->GetMap() &&
+                if (!bot->GetGroup() && !bot->InBattleground() && bot->GetMap() &&
                     !bot->GetMap()->Instanceable())
                     return 0.0f;
             }
@@ -206,6 +223,15 @@ namespace AzerothFriendStrategy
 #endif
     }
 
+    bool ModelGroups()
+    {
+#if AF_HAS_PLAYERBOTS
+        return g_modelGroups.load(std::memory_order_relaxed);
+#else
+        return true;
+#endif
+    }
+
     void SetTravelling(uint64_t botGuid, bool on)
     {
 #if AF_HAS_PLAYERBOTS
@@ -297,7 +323,13 @@ namespace AzerothFriendStrategy
     {
 #if AF_HAS_PLAYERBOTS
         if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
-            ai->ChangeStrategy(std::string("+") + AUTOPILOT_STRATEGY_NAME, BOT_STATE_NON_COMBAT);
+        {
+            for (BotState state : { BOT_STATE_NON_COMBAT, BOT_STATE_COMBAT, BOT_STATE_DEAD })
+            {
+                if (!ai->HasStrategy(AUTOPILOT_STRATEGY_NAME, state))
+                    ai->ChangeStrategy(std::string("+") + AUTOPILOT_STRATEGY_NAME, state);
+            }
+        }
 #else
         (void)bot;
 #endif
@@ -307,9 +339,101 @@ namespace AzerothFriendStrategy
     {
 #if AF_HAS_PLAYERBOTS
         if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
-            ai->ChangeStrategy(std::string("-") + AUTOPILOT_STRATEGY_NAME, BOT_STATE_NON_COMBAT);
+        {
+            for (BotState state : { BOT_STATE_NON_COMBAT, BOT_STATE_COMBAT, BOT_STATE_DEAD })
+            {
+                if (ai->HasStrategy(AUTOPILOT_STRATEGY_NAME, state))
+                    ai->ChangeStrategy(std::string("-") + AUTOPILOT_STRATEGY_NAME, state);
+            }
+        }
 #else
         (void)bot;
+#endif
+    }
+
+    bool IsBotEnrolled(uint64_t botGuid)
+    {
+        return IsBotEnrolledInternal(botGuid);
+    }
+
+    void SetBotEnrolled(uint64_t botGuid, bool enrolled)
+    {
+        std::lock_guard<std::mutex> lock(g_enrolledMutex);
+        if (enrolled)
+            g_enrolledBots.insert(botGuid);
+        else
+            g_enrolledBots.erase(botGuid);
+    }
+
+    void ClearEnrolledBots()
+    {
+        std::lock_guard<std::mutex> lock(g_enrolledMutex);
+        g_enrolledBots.clear();
+    }
+
+    std::string CaptureStrategies(PlayerbotAI* ai)
+    {
+#if AF_HAS_PLAYERBOTS
+        if (!ai)
+            return "";
+        auto join = [](const std::vector<std::string>& v)
+        {
+            std::string s;
+            for (const std::string& n : v)
+            {
+                if (n != AUTOPILOT_STRATEGY_NAME)
+                    s += (s.empty() ? "" : ",") + n;
+            }
+            return s;
+        };
+        return "nc:" + join(ai->GetStrategies(BOT_STATE_NON_COMBAT)) + ";co:" +
+               join(ai->GetStrategies(BOT_STATE_COMBAT));
+#else
+        (void)ai;
+        return "";
+#endif
+    }
+
+    void RestoreEngine(PlayerbotAI* ai, const std::string& baseline, BotState state)
+    {
+#if AF_HAS_PLAYERBOTS
+        if (!ai)
+            return;
+        const std::string prefix = state == BOT_STATE_COMBAT ? "co:" : "nc:";
+        std::unordered_set<std::string> want;
+        bool found = false;
+
+        std::stringstream ss(baseline);
+        std::string part;
+        while (std::getline(ss, part, ';'))
+        {
+            if (part.rfind(prefix, 0) == 0)
+            {
+                found = true;
+                std::stringstream partStream(part.substr(3));
+                std::string n;
+                while (std::getline(partStream, n, ','))
+                {
+                    if (!n.empty())
+                        want.insert(n);
+                }
+            }
+        }
+        if (!found)
+            return;
+
+        for (const std::string& n : ai->GetStrategies(state))
+        {
+            if (n != AUTOPILOT_STRATEGY_NAME && !want.count(n))
+                ai->ChangeStrategy("-" + n, state);
+        }
+        for (const std::string& n : want)
+        {
+            if (!ai->HasStrategy(n, state))
+                ai->ChangeStrategy("+" + n, state);
+        }
+#else
+        (void)ai; (void)baseline; (void)state;
 #endif
     }
 }

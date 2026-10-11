@@ -21,6 +21,7 @@ void Autopilot_LoadConfig();
 void Autopilot_Load();
 void Autopilot_Update(uint32_t diff);
 void Autopilot_SaveAll();
+void Autopilot_Off();
 
 bool Autopilot_IsActive();
 std::vector<std::string> Autopilot_InactiveReasons();

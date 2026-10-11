@@ -982,9 +982,9 @@ AzerothFriend.Grind.MaxLeashRadiusYards = 90.0
 #
 #   AzerothFriend.Autopilot.Enable
 #       Enable or disable autonomous autopilot operations.
-#       Default: 1
+#       Default: 0 (Safe opt-in)
 #
-AzerothFriend.Autopilot.Enable = 1
+AzerothFriend.Autopilot.Enable = 0
 
 #
 #   AzerothFriend.Autopilot.Debug
@@ -1003,9 +1003,44 @@ AzerothFriend.Autopilot.AllowMasterEnroll = 1
 #
 #   AzerothFriend.Autopilot.RandomBotPercent
 #       Percent of random bots enrolled into autopilot by default (0-100).
-#       Default: 100
+#       Default: 0 (Safe opt-in)
 #
-AzerothFriend.Autopilot.RandomBotPercent = 100
+AzerothFriend.Autopilot.RandomBotPercent = 0
+
+#
+#   AzerothFriend.Autopilot.Select.AltBots
+#       Enroll player alternative bots (alts) into autopilot.
+#       Default: 0
+#
+AzerothFriend.Autopilot.Select.AltBots = 0
+
+#
+#   AzerothFriend.Autopilot.Select.Guilds
+#       Comma-separated list of guild IDs eligible for autopilot enrollment.
+#       Default: ""
+#
+AzerothFriend.Autopilot.Select.Guilds = ""
+
+#
+#   AzerothFriend.Autopilot.Select.Accounts
+#       Comma-separated list of account IDs eligible for autopilot enrollment.
+#       Default: ""
+#
+AzerothFriend.Autopilot.Select.Accounts = ""
+
+#
+#   AzerothFriend.Autopilot.Select.Include
+#       Comma-separated list of specific bot names to always enroll.
+#       Default: ""
+#
+AzerothFriend.Autopilot.Select.Include = ""
+
+#
+#   AzerothFriend.Autopilot.Select.Exclude
+#       Comma-separated list of specific bot names to exclude from enrollment.
+#       Default: ""
+#
+AzerothFriend.Autopilot.Select.Exclude = ""
 
 #
 #   AzerothFriend.Autopilot.MinLevel / MaxLevel
@@ -1091,6 +1126,45 @@ AzerothFriend.Autopilot.KeepOnline = 1
 #       Default: 10
 #
 AzerothFriend.Autopilot.CorpseRunMinutes = 10
+
+#
+#   AzerothFriend.Autopilot.ForegroundRange
+#       Distance in yards from a real player considered within foreground range.
+#       Default: 100.0
+#
+AzerothFriend.Autopilot.ForegroundRange = 100.0
+
+#
+#   AzerothFriend.Autopilot.ForegroundScope
+#       Proximity boundary required to elevate an enrolled bot to Foreground tier.
+#       Options: range, zone, map, world, always
+#       Default: range
+#
+AzerothFriend.Autopilot.ForegroundScope = range
+
+#
+#   AzerothFriend.Autopilot.BackgroundScope
+#       Proximity boundary required to elevate an enrolled bot to Background tier.
+#       Options: range, zone, map, world, always
+#       Default: zone
+#
+AzerothFriend.Autopilot.BackgroundScope = zone
+
+#
+#   AzerothFriend.Autopilot.MinimumTier
+#       Minimum operating tier for enrolled autopilot bots.
+#       Options: dormant, background, foreground
+#       Default: dormant
+#
+AzerothFriend.Autopilot.MinimumTier = dormant
+
+#
+#   AzerothFriend.Autopilot.RequireRealPlayer
+#       Require an active real player nearby/online to plan and animate bot behaviors.
+#       Default: 0
+#
+AzerothFriend.Autopilot.RequireRealPlayer = 0
+
 
 ###############################################################################
 # PASSER-BY BUFFS & EMOTE EMBODIMENT

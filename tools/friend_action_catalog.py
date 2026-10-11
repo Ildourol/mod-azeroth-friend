@@ -168,6 +168,22 @@ CATALOG: Dict[str, Tuple[str, str, str, bool]] = {
 }
 
 BOT_API_VERSION = 1
+
+# Actions declared in catalog but without native C++ execution handlers in current version
+# (Audit findings P0-01, P2-14: safe containment prevents advertising to LLM / executing until Stage 2)
+UNSUPPORTED_ACTIONS = frozenset({
+    "goto_service", "goto_npc", "goto_player", "goto_zone", "goto_hunt", "goto_mailbox",
+    "quest_do", "ah_look", "ah_sell", "ah_buy", "disenchant", "open",
+    "group_invite", "group_accept", "group_decline", "group_share",
+})
+
+
+def is_supported(action_name: str) -> bool:
+    """Return True if an action has a verified execution handler in the current version."""
+    name = canonicalize(action_name)
+    return name in CATALOG and name not in UNSUPPORTED_ACTIONS
+
+
 OWNER_COMMAND_ACTIONS = {
     "buy", "sell", "bank", "guild_bank", "mail", "send_mail", "craft",
     "destroy_item", "give_gold", "outfit", "drop_quest", "trainer_learn", "talents",
@@ -1015,7 +1031,8 @@ def validate_step(step: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optio
 
 
 def normalize_plan(plan: Any, max_steps: int = 5, authority: str = "gm_manual",
-                   allow_raw_passthrough: bool = True) -> Tuple[List[Dict[str, Any]], List[str]]:
+                   allow_raw_passthrough: bool = True,
+                   allow_unsupported: bool = False) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Validate a whole plan. Returns (valid_steps, rejection_reasons)."""
     steps: List[Dict[str, Any]] = []
     rejects: List[str] = []
@@ -1034,6 +1051,9 @@ def normalize_plan(plan: Any, max_steps: int = 5, authority: str = "gm_manual",
         if step is None:
             rejects.append(error or "invalid step")
             continue
+        if not allow_unsupported and authority != "gm_manual" and step["action"] in UNSUPPORTED_ACTIONS:
+            rejects.append(f"unsupported_in_current_version:{step['action']} is not currently executable")
+            continue
         if not authority_allows(step["action"], authority):
             rejects.append("authority_denied:%s requires %s" %
                            (step["action"], required_authority(step["action"])))
@@ -1050,13 +1070,16 @@ def normalize_plan(plan: Any, max_steps: int = 5, authority: str = "gm_manual",
     return steps, rejects
 
 
-def prompt_catalog_text(authority: str = "autonomous", allow_raw_passthrough: bool = False) -> str:
+def prompt_catalog_text(authority: str = "autonomous", allow_raw_passthrough: bool = False,
+                        include_unsupported: bool = False) -> str:
     """Compact, token-friendly catalogue listing organized by semantic domain."""
     lines = []
     for domain, action_names in COMMAND_INDEX.items():
         formatted_actions = []
         for name in action_names:
             if name in ("playerbot_action", "playerbot_command") and not allow_raw_passthrough:
+                continue
+            if name in UNSUPPORTED_ACTIONS and not include_unsupported and authority != "gm_manual":
                 continue
             entry = CATALOG.get(name)
             if entry and authority_allows(name, authority):
@@ -1123,6 +1146,8 @@ def live_catalog_parts(rows, event_type: str, max_native: int = 90,
         required = str(row.get("authority") or required_authority(name))
         if name in ("playerbot_action", "playerbot_command") and not allow_raw_passthrough:
             continue
+        if name in UNSUPPORTED_ACTIONS and granted_authority != "gm_manual":
+            continue
         if required == "owner_command" and granted_authority != "owner_command":
             continue
         if source == "curated" and name in wanted:
@@ -1159,4 +1184,5 @@ def describe(action_name: str) -> str:
     entry = CATALOG.get(canonicalize(action_name))
     if not entry:
         return ""
-    return f"{canonicalize(action_name)} ({entry[1]}): {entry[2]}"
+    suffix = " [UNSUPPORTED in current version]" if canonicalize(action_name) in UNSUPPORTED_ACTIONS else ""
+    return f"{canonicalize(action_name)} ({entry[1]}): {entry[2]}{suffix}"

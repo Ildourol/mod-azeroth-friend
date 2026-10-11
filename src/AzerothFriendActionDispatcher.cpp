@@ -3474,6 +3474,41 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
         return true;
     }
 
+    // ---------------------------------------------------------------- autopilot
+    // Stage 0 containment (P0-01 / P2-14): explicit unsupported checks until real vertical slice execution handlers exist
+    if (actionType == "goto_service")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_npc")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_player")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_zone")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_hunt")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_mailbox")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "quest_do")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "ah_look")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "ah_sell")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "ah_buy")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "disenchant")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "open")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_invite")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_accept")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_decline")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_share")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+
     return Fail("unhandled_action '" + actionType + "'");
 }
 
