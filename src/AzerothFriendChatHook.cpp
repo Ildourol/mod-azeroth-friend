@@ -6,6 +6,12 @@
 #include "AzerothFriendBotController.h"
 #include "AzerothFriendShared.h"
 #include "AzerothFriendLiveState.h"
+#include "AzerothFriendAutopilot.h"
+#include "AzerothFriendBuffs.h"
+#include "AzerothFriendMonitor.h"
+#include "AzerothFriendRoute.h"
+#include "AzerothFriendTravel.h"
+#include "AzerothFriendWorldIndex.h"
 #include "ObjectAccessor.h"
 #include "Chat.h"
 #include "Group.h"
@@ -13,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <unordered_map>
+
 
 #if __has_include("Playerbots.h")
     #include "Playerbots.h"
@@ -170,6 +177,8 @@ bool AzerothFriendPlayerScript::OnPlayerCanUseChat(Player* player, uint32 /*type
         sAFDispatcher->InterruptBotPlan(botGuid, "Player whisper: " + msg, false);
         AzerothFriendShared::QueueEvent(botGuid, "player_command", 1, player->GetGUID().GetCounter(), player->GetName(), payload);
     }
+
+    Autopilot_NoteWhisper(player, receiver, msg);
     return true;
 }
 
@@ -538,15 +547,28 @@ void AzerothFriendWorldScript::OnAfterConfigLoad(bool /*reload*/)
         sAFLiveState->Start();
     else
         sAFLiveState->Stop();
+
+    Autopilot_LoadConfig();
+    Buffs_LoadConfig();
+    Monitor_LoadConfig();
+    AzerothFriendRoute::LoadConfig();
+    Autopilot_Load();
+    AzerothFriendWorldIndex::Build();
+    AzerothFriendTravel::Build();
 }
 
 void AzerothFriendWorldScript::OnUpdate(uint32 diff)
 {
     sAFDispatcher->Update(diff);
+    Autopilot_Update(diff);
+    Buffs_Update(diff);
+    Monitor_Update(diff);
 }
 
 void AzerothFriendWorldScript::OnShutdown()
 {
+    Autopilot_SaveAll();
+
     // Flush nothing to the socket: the bridge treats a closed transport as stale
     // and waits for a fresh baseline after the next start.
     sAFLiveState->Stop();
@@ -554,3 +576,4 @@ void AzerothFriendWorldScript::OnShutdown()
     // Hand every leased bot back to its own AI before the world goes down.
     sAFDispatcher->Shutdown();
 }
+

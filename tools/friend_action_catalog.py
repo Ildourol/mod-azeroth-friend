@@ -143,6 +143,24 @@ CATALOG: Dict[str, Tuple[str, str, str, bool]] = {
     "pvp": ("social", "", "Toggle PvP flag through the native playerbot command surface.", False),
     "roll": ("social", "[item]", "Roll on pending loot or linked item.", False),
 
+    # ---------------------------------------------------------------- autopilot
+    "goto_service": ("autopilot", "service", "Walk to nearest repair/vendor/trainer/profession/inn/flightmaster/bank/auction.", False),
+    "goto_npc": ("autopilot", "name", "Walk to named NPC across zones.", False),
+    "goto_player": ("autopilot", "name", "Pathfind to player character.", False),
+    "goto_zone": ("autopilot", "zone", "Walk/fly/ride to zone hub.", False),
+    "goto_hunt": ("autopilot", "", "Hunt level-appropriate monsters.", False),
+    "goto_mailbox": ("autopilot", "", "Walk to nearest mailbox.", False),
+    "quest_do": ("autopilot", "quest_id,[reward]", "Walk to quest objective or turn in completed quest.", False),
+    "ah_look": ("autopilot", "item", "Query auction house for item.", False),
+    "ah_sell": ("autopilot", "item,price", "Sell item on auction house.", False),
+    "ah_buy": ("autopilot", "item", "Buy item on auction house.", False),
+    "disenchant": ("autopilot", "item", "Disenchant inventory item.", False),
+    "open": ("autopilot", "guid", "Open gameobject or container.", False),
+    "group_invite": ("autopilot", "player", "Invite player to group.", False),
+    "group_accept": ("autopilot", "", "Accept pending group invite.", False),
+    "group_decline": ("autopilot", "", "Decline pending group invite.", False),
+    "group_share": ("autopilot", "", "Share current quest with party.", False),
+
     # --------------------------------------------------------------------- meta
     "playerbot_action": ("meta", "action,[param]", "Escape hatch: run ANY native mod-playerbots action (validated server side).", True),
     "playerbot_command": ("meta", "command", "Escape hatch: raw playerbot chat command (separator aware, denylist filtered).", True),
@@ -282,10 +300,16 @@ COMMAND_INDEX: Dict[str, List[str]] = {
         "trade_set_item", "trade_clear_item", "trade_set_gold", "trade_link_items",
         "inspect", "target", "pvp", "roll",
     ],
+    "autopilot": [
+        "goto_service", "goto_npc", "goto_player", "goto_zone", "goto_hunt", "goto_mailbox",
+        "quest_do", "ah_look", "ah_sell", "ah_buy", "disenchant", "open",
+        "group_invite", "group_accept", "group_decline", "group_share",
+    ],
     "meta": [
         "playerbot_action", "playerbot_command", "wait",
     ],
 }
+
 
 # Frequency-weighted Slash Command Index (from docs/Slash commands.md)
 # Ranked into 3 tiers by daily companion usage frequency for cognitive prioritization.
@@ -898,8 +922,65 @@ def validate_step(step: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optio
             category = "all"
         params["category"] = category
 
+    # ---------------------------------------------------------------- Autopilot
+    elif name == "goto_service":
+        service = str(params.get("service", "")).strip().lower()
+        if not service:
+            return None, "goto_service requires a service name (repair, vendor, trainer, etc.)"
+        params["service"] = service
+
+    elif name in ("goto_npc", "goto_player"):
+        target_name = str(params.get("name", params.get("target", ""))).strip()
+        if not target_name:
+            return None, f"{name} requires a target name"
+        params["name"] = target_name
+
+    elif name == "goto_zone":
+        zone = str(params.get("zone", params.get("name", ""))).strip()
+        if not zone:
+            return None, "goto_zone requires a zone name"
+        params["zone"] = zone
+
+    elif name == "quest_do":
+        quest_id = require_int("quest_id") or require_int("id")
+        if quest_id is None:
+            return None, "quest_do requires a numeric quest_id"
+        params["quest_id"] = quest_id
+
+    elif name in ("ah_look", "ah_buy"):
+        item = str(params.get("item", params.get("name", ""))).strip()
+        if not item:
+            return None, f"{name} requires an item name or id"
+        params["item"] = item
+
+    elif name == "ah_sell":
+        item = str(params.get("item", params.get("name", ""))).strip()
+        price = params.get("price")
+        if not item or price is None:
+            return None, "ah_sell requires item and price"
+        params["item"] = item
+
+    elif name == "disenchant":
+        item = str(params.get("item", params.get("name", ""))).strip()
+        if not item:
+            return None, "disenchant requires an item"
+        params["item"] = item
+
+    elif name == "open":
+        guid = require_int("guid")
+        if guid is None:
+            return None, "open requires a numeric object guid"
+        params["guid"] = guid
+
+    elif name == "group_invite":
+        player = str(params.get("player", params.get("name", ""))).strip()
+        if not player:
+            return None, "group_invite requires a player name"
+        params["player"] = player
+
     # ---------------------------------------------------------------------- Meta
     elif name == "playerbot_action":
+
         native = str(params.get("action", params.get("name", ""))).strip()
         if not native:
             return None, "playerbot_action requires an action name"

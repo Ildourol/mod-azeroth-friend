@@ -74,7 +74,7 @@ local COLORS = {
 -- Default Configuration
 local DEFAULT_SETTINGS = {
     showMaster = true,
-    activeTab = 1, -- 1: Context, 2: Mindset/Debug, 3: Actions, 4: Thoughts, 5: Bot API
+    activeTab = 1, -- 1: Overview, 2: Context, 3: Mindset/Debug, 4: Actions, 5: Bot API, 6: Thoughts, 7: Travel, 8: Planner, 9: Events
     layoutMode = "tabbed", -- "tabbed" or "floating"
     showMinimap = true,
     minimapPos = 45, -- angle in degrees
@@ -372,6 +372,571 @@ local function RestoreFramePosition(frame)
         frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
         if pos.width and pos.height then
             frame:SetSize(pos.width, pos.height)
+        end
+    end
+end
+
+-- ----------------------------------------------------------------------------
+-- Monitor Subsystem: Roster, Live Diagnostic Streaming & Farsight Camera
+-- ----------------------------------------------------------------------------
+
+local CLASS_FILES = {
+    [1] = "WARRIOR", [2] = "PALADIN", [3] = "HUNTER", [4] = "ROGUE", [5] = "PRIEST",
+    [6] = "DEATHKNIGHT", [7] = "SHAMAN", [8] = "MAGE", [9] = "WARLOCK", [11] = "DRUID",
+}
+
+local CLASS_ICONS = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+local CLASS_COORDS = {
+    WARRIOR     = { 0, 0.25, 0, 0.25 },
+    MAGE        = { 0.25, 0.49609375, 0, 0.25 },
+    ROGUE       = { 0.49609375, 0.7421875, 0, 0.25 },
+    DRUID       = { 0.7421875, 0.98828125, 0, 0.25 },
+    HUNTER      = { 0, 0.25, 0.25, 0.5 },
+    SHAMAN      = { 0.25, 0.49609375, 0.25, 0.5 },
+    PRIEST      = { 0.49609375, 0.7421875, 0.25, 0.5 },
+    WARLOCK     = { 0.7421875, 0.98828125, 0.25, 0.5 },
+    PALADIN     = { 0, 0.25, 0.5, 0.75 },
+    DEATHKNIGHT = { 0.25, 0.49609375, 0.5, 0.75 },
+}
+
+local STATE_COLORS = {
+    ["fighting"]             = "ff4040",
+    ["dead"]                 = "a0a0a0",
+    ["corpse run"]           = "a0a0a0",
+    ["travelling"]           = "40c0ff",
+    ["flying"]               = "40c0ff",
+    ["aboard"]               = "40c0ff",
+    ["waiting on the model"] = "ffd040",
+    ["idle"]                 = "ff9040",
+}
+
+local TIER_COLORS = {
+    foreground = "60e060",
+    background = "60a0ff",
+    dormant    = "909090",
+}
+
+local CHIPS = {
+    { key = "fighting", label = "Fighting", color = "ff4040", states = { ["fighting"] = true } },
+    { key = "moving",   label = "Moving",   color = "40c0ff", states = { ["travelling"] = true, ["flying"] = true, ["aboard"] = true } },
+    { key = "waiting",  label = "Waiting",  color = "ffd040", states = { ["waiting on the model"] = true } },
+    { key = "idle",     label = "Idle",     color = "ff9040", states = { ["idle"] = true, ["dead"] = true, ["corpse run"] = true } },
+}
+
+local C_THEME = {
+    window  = { 0.055, 0.058, 0.075 },
+    bar     = { 0.09, 0.095, 0.12 },
+    side    = { 0.07, 0.074, 0.095 },
+    content = { 0.035, 0.037, 0.048 },
+    line    = { 0.20, 0.21, 0.26 },
+    accent  = { 0.30, 0.62, 1.00 },
+}
+
+local M = {
+    bots        = {},     -- list of { guid, name, level, class, zone, tier, state, doing }
+    incoming    = nil,
+    selected    = nil,    -- guid string
+    pending     = nil,
+    waiting     = false,
+    askedAt     = 0,
+    pageAt      = 0,
+    listAt      = 0,
+    helloAt     = 0,
+    plain       = false,
+    autoRefresh = true,
+    watching    = nil,
+    watchNote   = "",
+    allowed     = true,
+    active      = true,
+    offReasons  = {},
+    filter      = "",
+    chip        = nil,
+    pages       = {
+        [1] = "overview",
+        [7] = "travel",
+        [8] = "planner",
+        [9] = "events",
+    },
+    pageLines   = {},
+    pageText    = "",
+}
+
+StaticPopupDialogs["AZEROTHFRIEND_TURN_OFF"] = {
+    text = "Take %s off autopilot?\n\nIts strategies go back to what it had before autopilot, and the LLM stops giving it orders.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function(self, name)
+        SendAddonMessage("AFUI", "CMD\toff\t" .. name, "WHISPER", UnitName("player"))
+        M.listAt = 0
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+}
+_G["StaticPopupDialogs"]["OLLAMAMONITOR_TURN_OFF"] = StaticPopupDialogs["AZEROTHFRIEND_TURN_OFF"]
+
+local function SplitTabs(text)
+    local out, from = {}, 1
+    while true do
+        local at = string.find(text, "\t", from, true)
+        if not at then
+            table.insert(out, string.sub(text, from))
+            return out
+        end
+        table.insert(out, string.sub(text, from, at - 1))
+        from = at + 1
+    end
+end
+
+local function BotByGuid(guid)
+    if not guid then return nil end
+    for _, b in ipairs(M.bots) do
+        if tostring(b.guid) == tostring(guid) then return b end
+    end
+    return nil
+end
+
+local function SelectedBot()
+    return M.selected and BotByGuid(M.selected)
+end
+
+local function ClassColor(class)
+    local c = RAID_CLASS_COLORS[CLASS_FILES[class] or ""]
+    if not c then return "ffffff" end
+    return string.format("%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255)
+end
+
+local function ClassName(class)
+    local file = CLASS_FILES[class]
+    if not file then return "" end
+    return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[file]) or file
+end
+
+local function SetClassIcon(tex, class)
+    local coords = CLASS_COORDS[CLASS_FILES[class] or ""]
+    if coords then
+        tex:SetTexture(CLASS_ICONS)
+        tex:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    else
+        tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+        tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
+end
+
+local function HexColor(hex)
+    if not hex or #hex < 6 then return 1, 1, 1 end
+    return tonumber(string.sub(hex, 1, 2), 16) / 255, tonumber(string.sub(hex, 3, 4), 16) / 255,
+        tonumber(string.sub(hex, 5, 6), 16) / 255
+end
+
+local function FlatBackdrop(f, fill, alpha, border)
+    if not f then return end
+    f:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 0, right = 0, top = 0, bottom = 0 }
+    })
+    f:SetBackdropColor(fill[1], fill[2], fill[3], alpha or 1)
+    local b = border or C_THEME.line
+    f:SetBackdropBorderColor(b[1], b[2], b[3], 1)
+end
+
+local function SetEnabled(button, on)
+    if not button then return end
+    if on then button:Enable() else button:Disable() end
+end
+
+local function Placeholder(box, hint)
+    if not box then return end
+    local fs = box:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    fs:SetPoint("LEFT", 4, 0)
+    fs:SetText(hint)
+    box.hint = fs
+    local function Update()
+        if (box:GetText() or "") == "" and not box.focused then fs:Show() else fs:Hide() end
+    end
+    box:HookScript("OnEditFocusGained", function() box.focused = true; Update() end)
+    box:HookScript("OnEditFocusLost", function() box.focused = false; Update() end)
+    box:HookScript("OnTextChanged", Update)
+    box.UpdateHint = Update
+    Update()
+end
+
+local function Tooltip(widget, title, body)
+    if not widget then return end
+    widget:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(title, 1, 1, 1)
+        if body then GameTooltip:AddLine(body, 0.8, 0.8, 0.8, true) end
+        GameTooltip:Show()
+    end)
+    widget:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+local chips = {}
+local rows = {}
+local listScroll
+local countText
+local refreshButton
+local listEmpty
+local serverPill, serverPillText
+local cardIcon, cardName, cardSub, cardDoing, statePill, statePillText, tierText
+local followButton, gotoButton, replanButton, statusButton, onOffButton
+local cameraDot, cameraText, sayBox, sendButton, autoCheck, plainCheck, updatedText
+local RefreshRosterList
+local UpdateBotCard
+local UpdateFooterCamera
+local UpdateServerState
+local SelectBot
+local OnMonitorMessage
+
+local function FormatServerPageText(lines)
+    if not lines or #lines == 0 then return "|cff909090(no server telemetry data)|r" end
+    local out = {}
+    for _, line in ipairs(lines) do
+        if M.plain then
+            table.insert(out, line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+        else
+            if string.sub(line, 1, 2) == "# " then
+                if #out > 0 then table.insert(out, "") end
+                table.insert(out, "|cffffd100" .. string.upper(string.sub(line, 3)) .. "|r")
+            else
+                local key, rest = string.match(line, "^(%s*[%w%s'%-%.%(%)]-):( .*)$")
+                if key and #key <= 40 then
+                    local lower = string.lower(line)
+                    local valueColor = ""
+                    if string.find(lower, "fail", 1, true) or string.find(lower, "stuck", 1, true) or
+                       string.find(lower, "error", 1, true) or string.find(lower, "dropped", 1, true) or
+                       string.find(lower, "idle:", 1, true) then
+                        valueColor = "|cffff6060"
+                    end
+                    table.insert(out, "|cff80b8ff" .. key .. ":|r" .. valueColor .. rest .. (valueColor ~= "" and "|r" or ""))
+                elseif string.find(string.lower(line), "error", 1, true) or string.find(string.lower(line), "fail", 1, true) then
+                    table.insert(out, COLORS.ALERT .. line .. COLORS.RESET)
+                else
+                    table.insert(out, COLORS.VALUE .. line .. COLORS.RESET)
+                end
+            end
+        end
+    end
+    return table.concat(out, "\n")
+end
+
+local function VisibleBots()
+    local list = {}
+    local filter = (M.filter or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    for _, b in ipairs(M.bots) do
+        local matchChip = true
+        if M.chip then
+            for _, chip in ipairs(CHIPS) do
+                if chip.key == M.chip then
+                    matchChip = chip.states[b.state] or false
+                    break
+                end
+            end
+        end
+        local matchFilter = true
+        if filter ~= "" then
+            local n = (b.name or ""):lower()
+            local z = (tostring(b.zone) or ""):lower()
+            local d = (b.doing or ""):lower()
+            local s = (b.state or ""):lower()
+            matchFilter = (n:find(filter, 1, true) or z:find(filter, 1, true) or d:find(filter, 1, true) or s:find(filter, 1, true)) ~= nil
+        end
+        if matchChip and matchFilter then
+            table.insert(list, b)
+        end
+    end
+    return list
+end
+
+local function UpdateChips()
+    if not chips or #chips == 0 then return end
+    local counts = {}
+    for _, chip in ipairs(CHIPS) do counts[chip.key] = 0 end
+    for _, b in ipairs(M.bots) do
+        for _, chip in ipairs(CHIPS) do
+            if chip.states[b.state] then counts[chip.key] = counts[chip.key] + 1 end
+        end
+    end
+    for _, c in ipairs(chips) do
+        local chip = c.chip
+        local on = (M.chip == chip.key)
+        local r, g, b = HexColor(chip.color)
+        if on then
+            FlatBackdrop(c, { r * 0.3, g * 0.3, b * 0.3 }, 1, { r, g, b })
+        else
+            FlatBackdrop(c, C_THEME.window, 1, C_THEME.line)
+        end
+        c.text:SetText(string.format("|cff%s%d|r %s", chip.color, counts[chip.key] or 0, chip.label))
+    end
+end
+
+RefreshRosterList = function()
+    if not listScroll then return end
+    local list = VisibleBots()
+    local ROWS = 14
+    local ROW_HEIGHT = 34
+    local fit = ROWS
+    FauxScrollFrame_Update(listScroll, #list, fit, ROW_HEIGHT)
+    local offset = FauxScrollFrame_GetOffset(listScroll)
+    for i = 1, ROWS do
+        local row = rows[i]
+        local b = (i <= fit) and list[offset + i] or nil
+        if b then
+            row.guid = b.guid
+            SetClassIcon(row.icon, b.class)
+            row.name:SetText(string.format("|cff%s%s|r", ClassColor(b.class), b.name))
+            row.level:SetText(b.level)
+            local r, g, bColor = HexColor(STATE_COLORS[b.state] or "c0c0c0")
+            row.dot:SetVertexColor(r, g, bColor)
+            row.sub:SetText(string.format("|cff%s%s|r%s", STATE_COLORS[b.state] or "c0c0c0", b.state,
+                (b.doing ~= "") and ("  |cff808080" .. b.doing .. "|r") or ""))
+            if tostring(b.guid) == tostring(M.selected) then
+                row.sel:Show()
+                row.bar:Show()
+            else
+                row.sel:Hide()
+                row.bar:Hide()
+            end
+            row:Show()
+        else
+            if GameTooltip:GetOwner() == row then GameTooltip:Hide() end
+            row.guid = nil
+            row:Hide()
+        end
+    end
+
+    if #M.bots == 0 then
+        if listEmpty then
+            listEmpty:SetText(M.allowed
+                and "No bots found on autopilot.\n\n|cff909090Target a bot and press Turn on, or let server autopilot enroll bots.|r"
+                or ("|cff909090" .. (M.denied or "Connecting to companion monitor...") .. "|r"))
+            listEmpty:Show()
+        end
+    elseif #list == 0 then
+        if listEmpty then
+            listEmpty:SetText("No bot matches.\n\n|cff909090Clear the search or active filter chip.|r")
+            listEmpty:Show()
+        end
+    else
+        if listEmpty then listEmpty:Hide() end
+    end
+
+    if countText then
+        countText:SetText((#list == #M.bots) and (#M.bots .. " bots") or (#list .. " of " .. #M.bots .. " bots"))
+    end
+    UpdateChips()
+end
+
+UpdateBotCard = function()
+    local b = SelectedBot()
+    if onOffButton then
+        onOffButton:SetText(b and "Turn off" or "Turn on")
+    end
+    if followButton then SetEnabled(followButton, b ~= nil or M.watching ~= nil) end
+    if gotoButton then SetEnabled(gotoButton, b ~= nil) end
+    if replanButton then SetEnabled(replanButton, b ~= nil) end
+    if statusButton then SetEnabled(statusButton, b ~= nil) end
+    if sendButton then SetEnabled(sendButton, b ~= nil) end
+    if sayBox and sayBox.hint then
+        sayBox.hint:SetText(b and ("Whisper " .. b.name) or "Select a bot to whisper")
+        if sayBox.UpdateHint then sayBox:UpdateHint() end
+    end
+
+    if b then
+        SetClassIcon(cardIcon, b.class)
+        cardName:SetText(string.format("|cff%s%s|r", ClassColor(b.class), b.name))
+        cardSub:SetText(string.format("Level %d %s  |cff606060|||r  %s", b.level, ClassName(b.class), b.zone))
+        cardDoing:SetText((b.doing ~= "") and b.doing or "|cff808080no current task|r")
+        local hex = STATE_COLORS[b.state] or "c0c0c0"
+        local r, g, bColor = HexColor(hex)
+        FlatBackdrop(statePill, { r * 0.22, g * 0.22, b * 0.22 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        statePillText:SetText("|cff" .. hex .. string.upper(b.state) .. "|r")
+        statePill:SetWidth(statePillText:GetStringWidth() + 18)
+        statePill:Show()
+        tierText:SetText("tier |cff" .. (TIER_COLORS[b.tier] or "c0c0c0") .. b.tier .. "|r")
+    else
+        statePill:Hide()
+        tierText:SetText("")
+        cardIcon:SetTexture("Interface\\Icons\\INV_Misc_Spyglass_03")
+        cardIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        cardName:SetText(BotCache.name and ("|cffa0a0a0" .. BotCache.name .. "|r") or "No bot selected")
+        cardSub:SetText("|cff909090Pick one on the left, or target a bot and press Turn on.|r")
+        cardDoing:SetText("")
+    end
+end
+
+UpdateFooterCamera = function()
+    if not cameraDot or not cameraText or not followButton then return end
+    if M.watching then
+        local b = BotByGuid(M.watching)
+        followButton:SetText("Stop camera")
+        cameraDot:SetVertexColor(0.3, 1, 0.3)
+        cameraText:SetText("Camera on |cffffffff" .. ((b and b.name) or M.watchName or "?") .. "|r" ..
+            ((M.watchNote and M.watchNote ~= "") and ("  |cff909090" .. M.watchNote .. "|r") or ""))
+    else
+        followButton:SetText("Follow camera")
+        cameraDot:SetVertexColor(0.4, 0.4, 0.4)
+        cameraText:SetText("|cff909090Camera: your own" ..
+            ((M.watchNote and M.watchNote ~= "") and ("  " .. M.watchNote) or "") .. "|r")
+    end
+    SetEnabled(followButton, SelectedBot() ~= nil or M.watching ~= nil)
+end
+
+UpdateServerState = function()
+    if not serverPill or not serverPillText then return end
+    if M.allowed and M.active then
+        local r, g, bColor = HexColor("60e060")
+        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        serverPillText:SetText("|cff60e060AUTOPILOT ON|r")
+        serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
+    elseif M.allowed and M.active == false then
+        local r, g, bColor = HexColor("ff6060")
+        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        serverPillText:SetText("|cffff6060AUTOPILOT OFF|r")
+        serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
+    elseif M.denied then
+        local r, g, bColor = HexColor("ff6060")
+        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        serverPillText:SetText("|cffff6060NO ACCESS|r")
+        serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
+    else
+        local r, g, bColor = HexColor("a0a0a0")
+        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        serverPillText:SetText("|cffa0a0a0CONNECTING|r")
+        serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
+    end
+end
+
+SelectBot = function(guid)
+    M.selected = tostring(guid)
+    M.gone = false
+    local picked = BotByGuid(guid)
+    if picked then
+        M.selectedName = picked.name
+        BotCache.name = picked.name
+        BotCache.class = CLASS_FILES[picked.class] or "Warrior"
+        BotCache.level = picked.level
+    end
+    local s = GetSettings()
+    local pageKey = M.pages[s.activeTab]
+    if pageKey and M.selected then
+        M.pageLines = {}
+        M.pageText = "|cff909090Loading server " .. pageKey .. " telemetry for " .. (picked and picked.name or "bot") .. "...|r"
+        SendAddonMessage("AFUI", "PAGE\t" .. M.selected .. "\t" .. pageKey, "WHISPER", UnitName("player"))
+    else
+        if picked and picked.name then
+            SendChatMessage(".af inspect " .. picked.name)
+        end
+    end
+    if UpdateBotCard then UpdateBotCard() end
+    if UpdateFooterCamera then UpdateFooterCamera() end
+    if RefreshRosterList then RefreshRosterList() end
+    if RefreshMasterTab then RefreshMasterTab() end
+end
+
+OnMonitorMessage = function(msg)
+    local f = SplitTabs(msg)
+    local kind = f[1]
+
+    if kind == "H" then
+        M.allowed = (f[2] ~= "0")
+        M.active = (f[3] == "active")
+        M.offReasons = {}
+        if M.allowed then
+            SendAddonMessage("AFUI", "LIST", "WHISPER", UnitName("player"))
+        end
+        if UpdateServerState then UpdateServerState() end
+    elseif kind == "LB" then
+        M.incoming = {}
+    elseif kind == "L" and M.incoming then
+        table.insert(M.incoming, {
+            guid = f[2],
+            name = f[3] or "?",
+            level = tonumber(f[4]) or 0,
+            class = tonumber(f[5]) or 1,
+            zone = f[6] or "",
+            tier = f[7] or "foreground",
+            state = f[8] or "idle",
+            doing = f[9] or "",
+        })
+    elseif kind == "LZ" and M.incoming then
+        table.sort(M.incoming, function(a, b) return (a.name or "") < (b.name or "") end)
+        M.bots = M.incoming
+        M.incoming = nil
+        if not M.selected and #M.bots > 0 then
+            local found = nil
+            for _, b in ipairs(M.bots) do
+                if b.name == BotCache.name then found = b; break end
+            end
+            if found then
+                SelectBot(found.guid)
+            else
+                SelectBot(M.bots[1].guid)
+            end
+        end
+        if RefreshRosterList then RefreshRosterList() end
+        if UpdateBotCard then UpdateBotCard() end
+        if UpdateFooterCamera then UpdateFooterCamera() end
+    elseif kind == "B" then
+        M.pending = { guid = f[2], page = f[3], lines = {}, partial = "" }
+    elseif kind == "P" and M.pending then
+        local piece = f[3] or ""
+        if f[2] == "c" then
+            M.pending.partial = M.pending.partial .. piece
+        else
+            table.insert(M.pending.lines, M.pending.partial .. piece)
+            M.pending.partial = ""
+        end
+    elseif kind == "Z" and M.pending then
+        local p = M.pending
+        M.pending = nil
+        M.waiting = false
+        M.pageAt = GetTime()
+        if p.guid == M.selected then
+            M.pageLines = p.lines
+            M.pageText = FormatServerPageText(p.lines)
+            if updatedText then
+                updatedText:SetText("updated " .. date("%H:%M:%S"))
+            end
+            if RefreshMasterTab then RefreshMasterTab() end
+        end
+    elseif kind == "W" then
+        local state = f[2]
+        M.watchNote = f[5] or ""
+        if state == "off" then
+            M.watching = nil
+        else
+            M.watching = f[3]
+            M.watchName = f[4]
+        end
+        if UpdateFooterCamera then UpdateFooterCamera() end
+    elseif kind == "G" then
+        M.waiting = false
+        if f[2] == M.selected then
+            table.insert(M.pageLines, 1, "# OFFLINE - last known state below; this page resumes if it logs back in")
+            M.pageText = FormatServerPageText(M.pageLines)
+            if updatedText then
+                updatedText:SetText("offline since " .. date("%H:%M:%S"))
+            end
+            if RefreshMasterTab then RefreshMasterTab() end
+        end
+    elseif kind == "M" then
+        M.waiting = false
+        local text = f[2] or ""
+        local why = string.match(text, "^Autopilot is off: (.*)$")
+        if why then
+            table.insert(M.offReasons, why)
+            if UpdateServerState then UpdateServerState() end
+            return
+        end
+        if not M.allowed or string.find(text, "AzerothFriend.Monitor.", 1, true) or string.find(text, "OllamaChat.Monitor.", 1, true) then
+            M.allowed = false
+            M.denied = text
+            if UpdateServerState then UpdateServerState() end
+            if RefreshRosterList then RefreshRosterList() end
         end
     end
 end
@@ -1138,6 +1703,68 @@ local function FormatThoughtsText()
     return table.concat(out, "\n")
 end
 
+local function FormatAutopilotText()
+    local out = {}
+    table.insert(out, COLORS.HEADER .. "Autonomous Autopilot, Travel & Errand Engine" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "2-Pass Navmesh Routing, Multi-Modal Transit & Errand Execution" .. COLORS.RESET)
+    table.insert(out, COLORS.MUTED .. string.rep("-", 50) .. COLORS.RESET)
+
+    -- Bot Profile & Autopilot Status
+    local autoActive = BotCache.autopilotEnabled or "INACTIVE"
+    local statusCol = (autoActive == "ACTIVE" or autoActive == "ON") and COLORS.SUCCESS or COLORS.ALERT
+    table.insert(out, COLORS.LABEL .. "Companion: " .. COLORS.RESET .. COLORS.SUCCESS .. tostring(BotCache.name or "Companion") .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Autopilot: " .. COLORS.RESET .. statusCol .. tostring(autoActive) .. COLORS.RESET)
+
+    local tier = tostring(BotCache.autopilotTier or "foreground")
+    local tierCol = tier == "foreground" and COLORS.SUCCESS or (tier == "background" and COLORS.CYAN or COLORS.MUTED)
+    table.insert(out, COLORS.LABEL .. "Tier: " .. COLORS.RESET .. tierCol .. tier:upper() .. COLORS.RESET ..
+                 COLORS.MUTED .. " | State: " .. COLORS.RESET .. COLORS.WARNING .. tostring(BotCache.autopilotState or "idle") .. COLORS.RESET)
+
+    table.insert(out, COLORS.LABEL .. "Current Task: " .. COLORS.RESET .. COLORS.VALUE .. tostring(BotCache.doing or "Normal companion play") .. COLORS.RESET)
+
+    -- Active Goal & Progress Telemetry
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "[Measurable Goals & Progress Diary]:" .. COLORS.RESET)
+    local goalState = AFGetGoalState and AFGetGoalState() or nil
+    if goalState and goalState.goal and goalState.goal ~= "" then
+        table.insert(out, COLORS.LABEL .. "Current Goal: " .. COLORS.RESET .. COLORS.VALUE .. tostring(goalState.goal) .. COLORS.RESET ..
+                     COLORS.MUTED .. " (status: " .. tostring(goalState.status or "active") .. ")" .. COLORS.RESET)
+    else
+        table.insert(out, COLORS.MUTED .. "  No specific measurable goal active." .. COLORS.RESET)
+    end
+
+    -- Travel & Routing Telemetry
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "[Multi-Modal Travel & Navmesh Routing]:" .. COLORS.RESET)
+    table.insert(out, COLORS.LABEL .. "Transit Engine: " .. COLORS.RESET .. COLORS.CYAN .. "2-Pass Navmesh + Boat/Zeppelin/Taxi Graph" .. COLORS.RESET)
+    if BotCache.routeDest and BotCache.routeDest ~= "" and BotCache.routeDest ~= "None" then
+        table.insert(out, COLORS.LABEL .. "Route Destination: " .. COLORS.RESET .. COLORS.VALUE .. tostring(BotCache.routeDest) .. COLORS.RESET)
+        table.insert(out, COLORS.LABEL .. "Travel Mode: " .. COLORS.RESET .. COLORS.GOLD .. tostring(BotCache.travelMode or "Walking") .. COLORS.RESET)
+    else
+        table.insert(out, COLORS.MUTED .. "  No cross-zone route currently in progress." .. COLORS.RESET)
+    end
+
+    -- Errand & Order Tracking
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "[Active Errand & Order Execution]:" .. COLORS.RESET)
+    if BotCache.errandType and BotCache.errandType ~= "" and BotCache.errandType ~= "None" then
+        table.insert(out, COLORS.LABEL .. "Errand: " .. COLORS.RESET .. COLORS.PURPLE .. tostring(BotCache.errandType) .. COLORS.RESET ..
+                     COLORS.MUTED .. " | Target: " .. COLORS.RESET .. COLORS.VALUE .. tostring(BotCache.errandTarget or "-") .. COLORS.RESET)
+        table.insert(out, COLORS.LABEL .. "Progress: " .. COLORS.RESET .. COLORS.SUCCESS .. tostring(BotCache.errandProgress or "In Progress") .. COLORS.RESET)
+    else
+        table.insert(out, COLORS.MUTED .. "  No errand active. Bot obeys owner commands and native goals." .. COLORS.RESET)
+    end
+
+    -- Commands & Monitor Bridge
+    table.insert(out, "\n" .. COLORS.HEADER .. "[Tactical Commands & Multi-Bot Monitor]:" .. COLORS.RESET)
+    table.insert(out, COLORS.MUTED .. "  Console Commands:" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "    .af autopilot on [name]" .. COLORS.RESET .. COLORS.MUTED .. "  - Activate autopilot on bot" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "    .af autopilot off [name]" .. COLORS.RESET .. COLORS.MUTED .. " - Return bot to normal behavior" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "    .af autopilot tier <tier>" .. COLORS.RESET .. COLORS.MUTED .. " - Set tier: foreground|background|dormant" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "    .af autopilot pause/resume" .. COLORS.RESET .. COLORS.MUTED .. " - Temporarily pause errand progression" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "    .af autopilot status [name]" .. COLORS.RESET .. COLORS.MUTED .. " - Full diagnostic dump to chat" .. COLORS.RESET)
+    table.insert(out, "\n" .. COLORS.GOLD .. "  >> Type |cFFFFFFFF/afmonitor|r or |cFFFFFFFF/afm|r to open the Full Radar & Camera Monitor! <<" .. COLORS.RESET)
+
+    return table.concat(out, "\n")
+end
+
 -- Refresh Master Frame and floating frames
 RefreshMasterTab = function()
     -- Update floating panels if shown
@@ -1161,10 +1788,10 @@ RefreshMasterTab = function()
 
     local s = GetSettings()
     local tab = s.activeTab or 1
-    if tab > 5 then tab = 5 end
+    if tab > 9 then tab = 9 end
 
     -- Reset button highlights
-    for i = 1, 5 do
+    for i = 1, 9 do
         local btn = _G["AzerothFriendMasterTab" .. i]
         if btn then
             if i == tab then
@@ -1251,7 +1878,7 @@ RefreshMasterTab = function()
     end
 
     -- Render active tab content
-    if tab == 3 then
+    if tab == 4 then
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:Hide() end
         if AzerothFriendApiPanel then AzerothFriendApiPanel:Hide() end
         if AzerothFriendActionsPanel then
@@ -1389,11 +2016,19 @@ RefreshMasterTab = function()
         if AzerothFriendApiPanel then AzerothFriendApiPanel:Hide() end
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:Show() end
         if tab == 1 then
-            SetContainerText(AzerothFriendMasterHTML, FormatContextText())
+            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or FormatContextText())
         elseif tab == 2 then
+            SetContainerText(AzerothFriendMasterHTML, FormatContextText())
+        elseif tab == 3 then
             SetContainerText(AzerothFriendMasterHTML, FormatMindsetDebugText())
-        elseif tab == 4 then
+        elseif tab == 6 then
             SetContainerText(AzerothFriendMasterHTML, FormatThoughtsText())
+        elseif tab == 7 then
+            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or FormatAutopilotText())
+        elseif tab == 8 then
+            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or "|cff909090Awaiting server planner telemetry...|r")
+        elseif tab == 9 then
+            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or "|cff909090Awaiting server events telemetry...|r")
         end
     end
 end
@@ -1454,6 +2089,11 @@ local function ProcessMessage(msg)
                 elseif kl == "spellbook" then BotCache.spellbook = v
                 elseif kl == "casting" then BotCache.casting = v
                 elseif kl == "actionmode" then BotCache.actionMode = v:lower()
+                elseif kl == "autopilot" then BotCache.autopilotEnabled = v:upper()
+                elseif kl == "tier" then BotCache.autopilotTier = v:lower()
+                elseif kl == "doing" then BotCache.doing = v
+                elseif kl == "state" then BotCache.autopilotState = v:lower()
+                elseif kl == "errand" then BotCache.errandType = v
                 end
             end
         end
@@ -2314,20 +2954,285 @@ end
 
 -- Initialize Master HUD and wire buttons
 local function InitializeMasterFrame()
-    SetupFrame(AzerothFriendMasterFrame, AzerothFriendMasterFrameTitleBar, 620, 420)
-    -- Layouts saved before the autonomy switch was added are narrower than the
-    -- control bar needs; widen them instead of letting the switch clip.
-    if AzerothFriendMasterFrame:GetWidth() < 620 then
-        AzerothFriendMasterFrame:SetWidth(620)
+    SetupFrame(AzerothFriendMasterFrame, AzerothFriendMasterFrameTitleBar, 980, 620)
+    if AzerothFriendMasterFrame:GetWidth() < 980 then
+        AzerothFriendMasterFrame:SetWidth(980)
     end
-    if AzerothFriendMasterFrame:GetHeight() < 420 then
-        AzerothFriendMasterFrame:SetHeight(420)
+    if AzerothFriendMasterFrame:GetHeight() < 620 then
+        AzerothFriendMasterFrame:SetHeight(620)
+    end
+
+    -- Server Autopilot Status Pill in Title Bar
+    if not serverPill and AzerothFriendMasterFrameTitleBar then
+        serverPill = CreateFrame("Frame", nil, AzerothFriendMasterFrameTitleBar)
+        serverPill:SetHeight(18)
+        serverPill:SetPoint("RIGHT", AzerothFriendMasterFrameSubtitle, "LEFT", -12, 0)
+        serverPillText = serverPill:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        serverPillText:SetPoint("CENTER")
+        UpdateServerState()
+    end
+
+    -- Multi-bot Sidebar Roster (Left 272px)
+    local side = _G["AzerothFriendSidebar"]
+    if not side then
+        side = CreateFrame("Frame", "AzerothFriendSidebar", AzerothFriendMasterFrame)
+        side:SetPoint("TOPLEFT", 12, -32)
+        side:SetPoint("BOTTOMLEFT", 12, 12)
+        side:SetWidth(272)
+        FlatBackdrop(side, C_THEME.side, 1, C_THEME.line)
+
+        local filterBox = CreateFrame("EditBox", "AzerothFriendFilterBox", side, "InputBoxTemplate")
+        filterBox:SetHeight(22)
+        filterBox:SetPoint("TOPLEFT", 16, -6)
+        filterBox:SetPoint("TOPRIGHT", -10, -6)
+        filterBox:SetAutoFocus(false)
+        filterBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        filterBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+        Placeholder(filterBox, "Search name, zone, state...")
+        filterBox:HookScript("OnTextChanged", function(self)
+            M.filter = self:GetText() or ""
+            RefreshRosterList()
+        end)
+
+        local chipW = math.floor((272 - 20 - 3 * 4) / 4)
+        for i, chip in ipairs(CHIPS) do
+            local c = CreateFrame("Button", nil, side)
+            c:SetSize(chipW, 20)
+            if i == 1 then
+                c:SetPoint("TOPLEFT", 10, -32)
+            else
+                c:SetPoint("LEFT", chips[i - 1], "RIGHT", 4, 0)
+            end
+            c.text = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            c.text:SetPoint("CENTER")
+            c.chip = chip
+            local hl = c:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetTexture(1, 1, 1, 0.06)
+            c:SetScript("OnClick", function()
+                M.chip = (M.chip ~= chip.key) and chip.key or nil
+                UpdateChips()
+                RefreshRosterList()
+            end)
+            c:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine(chip.label, 1, 1, 1)
+                GameTooltip:AddLine("Show only bots in this state. Click again to show all.", 0.8, 0.8, 0.8, true)
+                GameTooltip:Show()
+            end)
+            c:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            chips[i] = c
+        end
+
+        listScroll = CreateFrame("ScrollFrame", "AzerothFriendRosterScroll", side, "FauxScrollFrameTemplate")
+        listScroll:SetPoint("TOPLEFT", 0, -56)
+        listScroll:SetPoint("BOTTOMRIGHT", -26, 26)
+        listScroll:SetScript("OnVerticalScroll", function(self, offset)
+            FauxScrollFrame_OnVerticalScroll(self, offset, 34, RefreshRosterList)
+        end)
+
+        countText = side:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        countText:SetPoint("BOTTOMLEFT", 10, 8)
+
+        refreshButton = CreateFrame("Button", nil, side)
+        refreshButton:SetSize(16, 16)
+        refreshButton:SetPoint("BOTTOMRIGHT", -8, 6)
+        refreshButton:SetNormalTexture("Interface\\Buttons\\UI-RefreshButton")
+        refreshButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        refreshButton:SetScript("OnClick", function()
+            M.listAt = 0
+            SendAddonMessage("AFUI", "LIST", "WHISPER", UnitName("player"))
+        end)
+
+        listEmpty = side:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        listEmpty:SetPoint("TOPLEFT", 16, -72)
+        listEmpty:SetPoint("RIGHT", -16, 0)
+        listEmpty:SetJustifyH("LEFT")
+        listEmpty:SetJustifyV("TOP")
+
+        for i = 1, 14 do
+            local row = CreateFrame("Button", nil, side)
+            row:SetHeight(34)
+            row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", 0, -(i - 1) * 34)
+            row:SetPoint("RIGHT", listScroll, "RIGHT", 0, 0)
+
+            local hl = row:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetTexture(1, 1, 1, 0.05)
+
+            row.sel = row:CreateTexture(nil, "BACKGROUND")
+            row.sel:SetAllPoints()
+            row.sel:SetTexture(C_THEME.accent[1], C_THEME.accent[2], C_THEME.accent[3], 0.16)
+
+            row.bar = row:CreateTexture(nil, "ARTWORK")
+            row.bar:SetPoint("TOPLEFT")
+            row.bar:SetPoint("BOTTOMLEFT")
+            row.bar:SetWidth(3)
+            row.bar:SetTexture(C_THEME.accent[1], C_THEME.accent[2], C_THEME.accent[3], 1)
+
+            row.icon = row:CreateTexture(nil, "ARTWORK")
+            row.icon:SetSize(24, 24)
+            row.icon:SetPoint("LEFT", 8, 0)
+
+            row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            row.name:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, 1)
+            row.name:SetJustifyH("LEFT")
+
+            row.level = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            row.level:SetPoint("TOPRIGHT", -6, -4)
+
+            row.dot = row:CreateTexture(nil, "ARTWORK")
+            row.dot:SetSize(6, 6)
+            row.dot:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 2)
+            row.dot:SetTexture("Interface\\Buttons\\WHITE8X8")
+
+            row.sub = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            row.sub:SetPoint("LEFT", row.dot, "RIGHT", 4, 0)
+            row.sub:SetPoint("RIGHT", -6, 0)
+            row.sub:SetHeight(12)
+            row.sub:SetJustifyH("LEFT")
+
+            local divider = row:CreateTexture(nil, "BORDER")
+            divider:SetPoint("BOTTOMLEFT", 6, 0)
+            divider:SetPoint("BOTTOMRIGHT", -4, 0)
+            divider:SetHeight(1)
+            divider:SetTexture(1, 1, 1, 0.04)
+
+            row:SetScript("OnClick", function(self)
+                if self.guid then SelectBot(self.guid) end
+            end)
+            row:SetScript("OnEnter", function(self)
+                local b = self.guid and BotByGuid(self.guid)
+                if not b then return end
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(string.format("|cff%s%s|r", ClassColor(b.class), b.name))
+                GameTooltip:AddLine("Level " .. b.level .. " " .. ClassName(b.class), 0.8, 0.8, 0.8)
+                GameTooltip:AddLine(b.zone, 0.8, 0.8, 0.8)
+                local stateR, stateG, stateB = HexColor(STATE_COLORS[b.state] or "c0c0c0")
+                GameTooltip:AddDoubleLine("State", b.state, 0.6, 0.6, 0.6, stateR, stateG, stateB)
+                local tierR, tierG, tierB = HexColor(TIER_COLORS[b.tier] or "c0c0c0")
+                GameTooltip:AddDoubleLine("Tier", b.tier, 0.6, 0.6, 0.6, tierR, tierG, tierB)
+                if b.doing ~= "" then GameTooltip:AddLine(b.doing, 1, 0.82, 0, true) end
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            rows[i] = row
+        end
+    end
+
+    -- Selected Bot Card (Top of Main Area)
+    local card = _G["AzerothFriendSelectedBotCard"]
+    if not card then
+        card = CreateFrame("Frame", "AzerothFriendSelectedBotCard", AzerothFriendMasterFrame)
+        card:SetPoint("TOPLEFT", 296, -32)
+        card:SetPoint("TOPRIGHT", -24, -32)
+        card:SetHeight(34)
+
+        cardIcon = card:CreateTexture(nil, "ARTWORK")
+        cardIcon:SetSize(32, 32)
+        cardIcon:SetPoint("LEFT", 0, 0)
+
+        cardName = card:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        cardName:SetPoint("TOPLEFT", cardIcon, "TOPRIGHT", 8, 2)
+        cardName:SetJustifyH("LEFT")
+
+        cardSub = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cardSub:SetPoint("BOTTOMLEFT", cardIcon, "BOTTOMRIGHT", 8, 0)
+        cardSub:SetJustifyH("LEFT")
+
+        cardDoing = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        cardDoing:SetPoint("LEFT", cardSub, "RIGHT", 14, 0)
+        cardDoing:SetPoint("RIGHT", card, "RIGHT", -160, 0)
+        cardDoing:SetHeight(14)
+        cardDoing:SetJustifyH("LEFT")
+
+        statePill = CreateFrame("Frame", nil, card)
+        statePill:SetHeight(18)
+        statePill:SetPoint("TOPRIGHT", 0, 0)
+        statePillText = statePill:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        statePillText:SetPoint("CENTER")
+
+        tierText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        tierText:SetPoint("TOPRIGHT", statePill, "BOTTOMRIGHT", 0, -2)
+    end
+
+    -- Row 2 Monitor Action Buttons (anchored at y = -94)
+    if not followButton then
+        followButton = CreateFrame("Button", "AzerothFriendBtnFollowCam", AzerothFriendMasterFrame, "UIPanelButtonTemplate")
+        followButton:SetSize(110, 22)
+        followButton:SetPoint("TOPLEFT", 296, -94)
+        followButton:SetText("Follow camera")
+        followButton:SetScript("OnClick", function()
+            if M.watching then
+                SendAddonMessage("AFUI", "UNWATCH", "WHISPER", UnitName("player"))
+            elseif M.selected then
+                SendAddonMessage("AFUI", "WATCH " .. M.selected, "WHISPER", UnitName("player"))
+            end
+        end)
+        Tooltip(followButton, "Follow camera", "Your camera follows the bot. Your own character stays where it is.")
+
+        gotoButton = CreateFrame("Button", "AzerothFriendBtnGoto", AzerothFriendMasterFrame, "UIPanelButtonTemplate")
+        gotoButton:SetSize(90, 22)
+        gotoButton:SetPoint("LEFT", followButton, "RIGHT", 4, 0)
+        gotoButton:SetText("Teleport to")
+        gotoButton:SetScript("OnClick", function()
+            if M.selected then
+                SendAddonMessage("AFUI", "GOTO " .. M.selected, "WHISPER", UnitName("player"))
+            end
+        end)
+        Tooltip(gotoButton, "Teleport to", "Moves your character to the selected bot.")
+
+        replanButton = CreateFrame("Button", "AzerothFriendBtnReplan", AzerothFriendMasterFrame, "UIPanelButtonTemplate")
+        replanButton:SetSize(86, 22)
+        replanButton:SetPoint("LEFT", gotoButton, "RIGHT", 4, 0)
+        replanButton:SetText("Replan now")
+        replanButton:SetScript("OnClick", function()
+            local b = SelectedBot()
+            if b then
+                SendAddonMessage("AFUI", "CMD replan " .. b.name, "WHISPER", UnitName("player"))
+            end
+        end)
+        Tooltip(replanButton, "Replan now", "Asks the AI model for new planning orders straight away.")
+
+        statusButton = CreateFrame("Button", "AzerothFriendBtnStatus", AzerothFriendMasterFrame, "UIPanelButtonTemplate")
+        statusButton:SetSize(100, 22)
+        statusButton:SetPoint("LEFT", replanButton, "RIGHT", 4, 0)
+        statusButton:SetText("Status to chat")
+        statusButton:SetScript("OnClick", function()
+            local b = SelectedBot()
+            if b then
+                SendAddonMessage("AFUI", "CMD status " .. b.name, "WHISPER", UnitName("player"))
+            end
+        end)
+        Tooltip(statusButton, "Status to chat", "Prints the bot's full companion & autopilot status to chat.")
+
+        onOffButton = CreateFrame("Button", "AzerothFriendBtnOnOff", AzerothFriendMasterFrame, "UIPanelButtonTemplate")
+        onOffButton:SetSize(86, 22)
+        onOffButton:SetPoint("TOPRIGHT", -24, -94)
+        onOffButton:SetText("Turn off")
+        onOffButton:SetScript("OnClick", function()
+            local b = SelectedBot()
+            if b then
+                local dialog = StaticPopup_Show("AZEROTHFRIEND_TURN_OFF", b.name)
+                if dialog then dialog.data = b.name end
+            else
+                local targetName = UnitName("target")
+                local name = (targetName and UnitIsPlayer("target")) and targetName or (M.selectedName or (BotCache and BotCache.name))
+                if name and name ~= "" then
+                    SendAddonMessage("AFUI", "CMD on " .. name, "WHISPER", UnitName("player"))
+                    M.listAt = 0
+                else
+                    print(COLORS.ALERT .. "AzerothFriend: Select a bot or target one to turn autopilot on." .. COLORS.RESET)
+                end
+            end
+        end)
+        Tooltip(onOffButton, "Turn autopilot on or off", "Turn off hands the bot back to native strategies. Turn on enrolls the bot into autonomous autopilot.")
     end
 
     -- Dedicated Interactive Actions Panel (Tab 4) with Checkbox Catalog
     local actionsPanel = CreateFrame("Frame", "AzerothFriendActionsPanel", AzerothFriendMasterFrame)
-    actionsPanel:SetPoint("TOPLEFT", AzerothFriendMasterFrame, "TOPLEFT", 14, -62)
-    actionsPanel:SetPoint("BOTTOMRIGHT", AzerothFriendMasterFrame, "BOTTOMRIGHT", -24, 38)
+    actionsPanel:SetPoint("TOPLEFT", AzerothFriendMasterFrame, "TOPLEFT", 296, -146)
+    actionsPanel:SetPoint("BOTTOMRIGHT", AzerothFriendMasterFrame, "BOTTOMRIGHT", -24, 40)
     actionsPanel:Hide()
 
     local pipelineHeader = actionsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2487,8 +3392,8 @@ local function InitializeMasterFrame()
     -- Dedicated Bot API v1 panel. Inputs only dispatch existing server commands;
     -- every contract, permission flag and result shown below comes from telemetry.
     local apiPanel = CreateFrame("Frame", "AzerothFriendApiPanel", AzerothFriendMasterFrame)
-    apiPanel:SetPoint("TOPLEFT", AzerothFriendMasterFrame, "TOPLEFT", 14, -62)
-    apiPanel:SetPoint("BOTTOMRIGHT", AzerothFriendMasterFrame, "BOTTOMRIGHT", -24, 38)
+    apiPanel:SetPoint("TOPLEFT", AzerothFriendMasterFrame, "TOPLEFT", 296, -146)
+    apiPanel:SetPoint("BOTTOMRIGHT", AzerothFriendMasterFrame, "BOTTOMRIGHT", -24, 40)
     apiPanel:Hide()
 
     local apiHeader = apiPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2595,8 +3500,8 @@ local function InitializeMasterFrame()
     apiBody:SetJustifyV("TOP")
     apiScroll:SetScrollChild(apiBodyFrame)
 
-    -- Tab buttons (5 tabs)
-    for i = 1, 5 do
+    -- Tab buttons (9 tabs)
+    for i = 1, 9 do
         local tabIndex = i
         local btn = _G["AzerothFriendMasterTab" .. tabIndex]
         if btn then
@@ -2608,6 +3513,12 @@ local function InitializeMasterFrame()
                 if tabIndex == 5 and AzerothFriendApiContractScroll then
                     AzerothFriendApiContractScroll:SetVerticalScroll(0)
                     if not BotCache.apiCatalogLoaded then RequestBotApiCatalog() end
+                end
+                local pageKey = M.pages[tabIndex]
+                if pageKey and M.selected then
+                    M.pageLines = {}
+                    M.pageText = "|cff909090Loading server " .. pageKey .. " telemetry...|r"
+                    SendAddonMessage("AFUI", "PAGE\t" .. M.selected .. "\t" .. pageKey, "WHISPER", UnitName("player"))
                 end
                 RefreshMasterTab()
             end)
@@ -2924,6 +3835,92 @@ local function InitializeMasterFrame()
         AzerothFriendMasterFrameTitleBar:HookScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
+    -- Footer: camera status, whisper box, auto-refresh and plain text toggles
+    local footer = _G["AzerothFriendFooter"]
+    if not footer then
+        footer = CreateFrame("Frame", "AzerothFriendFooter", AzerothFriendMasterFrame)
+        footer:SetPoint("BOTTOMLEFT", 296, 6)
+        footer:SetPoint("BOTTOMRIGHT", -24, 6)
+        footer:SetHeight(30)
+
+        cameraDot = footer:CreateTexture(nil, "ARTWORK")
+        cameraDot:SetSize(8, 8)
+        cameraDot:SetPoint("LEFT", 2, 0)
+        cameraDot:SetTexture("Interface\\Buttons\\WHITE8X8")
+
+        cameraText = footer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cameraText:SetPoint("LEFT", cameraDot, "RIGHT", 6, 0)
+        cameraText:SetPoint("RIGHT", footer, "RIGHT", -360, 0)
+        cameraText:SetHeight(12)
+        cameraText:SetJustifyH("LEFT")
+
+        sayBox = CreateFrame("EditBox", "AzerothFriendWhisperEdit", footer, "InputBoxTemplate")
+        sayBox:SetHeight(22)
+        sayBox:SetPoint("RIGHT", footer, "RIGHT", -220, 0)
+        sayBox:SetWidth(120)
+        sayBox:SetAutoFocus(false)
+        sayBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        Placeholder(sayBox, "Whisper bot")
+
+        local function DoWhisper()
+            local b = SelectedBot()
+            local msg = sayBox:GetText()
+            if b and msg and msg ~= "" then
+                SendChatMessage(msg, "WHISPER", nil, b.name)
+                sayBox:SetText("")
+                sayBox:ClearFocus()
+            end
+        end
+        sayBox:SetScript("OnEnterPressed", function(self) DoWhisper() end)
+
+        sendButton = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
+        sendButton:SetSize(62, 22)
+        sendButton:SetPoint("LEFT", sayBox, "RIGHT", 4, 0)
+        sendButton:SetText("Whisper")
+        sendButton:SetScript("OnClick", DoWhisper)
+
+        autoCheck = CreateFrame("CheckButton", "AzerothFriendAutoCheck", footer, "UICheckButtonTemplate")
+        autoCheck:SetSize(20, 20)
+        autoCheck:SetPoint("LEFT", sendButton, "RIGHT", 8, 0)
+        _G["AzerothFriendAutoCheckText"]:SetText("Auto")
+        _G["AzerothFriendAutoCheckText"]:SetFontObject(GameFontHighlightSmall)
+        autoCheck:SetChecked(1)
+        autoCheck:SetScript("OnClick", function(self)
+            M.autoRefresh = self:GetChecked() and true or false
+        end)
+
+        plainCheck = CreateFrame("CheckButton", "AzerothFriendPlainCheck", footer, "UICheckButtonTemplate")
+        plainCheck:SetSize(20, 20)
+        plainCheck:SetPoint("LEFT", autoCheck, "RIGHT", 40, 0)
+        _G["AzerothFriendPlainCheckText"]:SetText("Plain")
+        _G["AzerothFriendPlainCheckText"]:SetFontObject(GameFontHighlightSmall)
+        plainCheck:SetChecked(nil)
+        plainCheck:SetScript("OnClick", function(self)
+            M.plain = self:GetChecked() and true or false
+            if RefreshMasterTab then RefreshMasterTab() end
+        end)
+
+        updatedText = footer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        updatedText:SetPoint("RIGHT", autoCheck, "LEFT", -6, 0)
+    end
+
+    if UpdateBotCard then UpdateBotCard() end
+    if UpdateFooterCamera then UpdateFooterCamera() end
+    if UpdateServerState then UpdateServerState() end
+    if RefreshRosterList then RefreshRosterList() end
+
+    AzerothFriendMasterFrame:HookScript("OnShow", function()
+        M.helloAt = GetTime()
+        SendAddonMessage("AFUI", "HELLO", "WHISPER", UnitName("player"))
+        M.listAt = 0
+        if autoCheck then autoCheck:SetChecked(M.autoRefresh ~= false) end
+        if plainCheck then plainCheck:SetChecked(M.plain or false) end
+        if UpdateBotCard then UpdateBotCard() end
+        if UpdateFooterCamera then UpdateFooterCamera() end
+        if RefreshRosterList then RefreshRosterList() end
+        RefreshMasterTab()
+    end)
+
     local s = GetSettings()
     if s.showMaster then
         AzerothFriendMasterFrame:Show()
@@ -3000,10 +3997,11 @@ listener:SetScript("OnEvent", function(self, event, ...)
         local message = ...
         ProcessMessage(message)
     elseif event == "CHAT_MSG_ADDON" then
-        -- Addon messages carry (prefix, payload, channel, sender). Other addons
-        -- broadcast localisation tables and protocol frames through this channel;
-        -- they are transport, never dialogue. Only our own legacy prefix is parsed.
-        local prefix, payload = ...
+        local prefix, payload, channel, sender = ...
+        if (prefix == "AFUI" or prefix == "OAPM") and type(payload) == "string" then
+            if OnMonitorMessage then OnMonitorMessage(payload) end
+            return
+        end
         if prefix == ADDON_PREFIX and type(payload) == "string" then
             ProcessMessage(payload)
         end
@@ -3031,17 +4029,65 @@ end)
 -- Coalesced repaint loop: at most one HUD render per 0.2s no matter how many
 -- telemetry packets land in between.
 listener:SetScript("OnUpdate", function(_, elapsed)
-    if not refreshQueued then return end
-    refreshElapsed = refreshElapsed + elapsed
-    if refreshElapsed < 0.2 then return end
-    refreshElapsed = 0
-    refreshQueued = false
-    RefreshMasterTab()
+    if refreshQueued then
+        refreshElapsed = refreshElapsed + elapsed
+        if refreshElapsed >= 0.2 then
+            refreshElapsed = 0
+            refreshQueued = false
+            RefreshMasterTab()
+        end
+    end
+
+    if AzerothFriendMasterFrame and AzerothFriendMasterFrame:IsShown() then
+        local now = GetTime()
+        if not M.allowed then
+            if not M.denied and (now - M.helloAt >= 6) then
+                M.helloAt = now
+                SendAddonMessage("AFUI", "HELLO", "WHISPER", UnitName("player"))
+            end
+        else
+            if (now - M.listAt >= 5) then
+                M.listAt = now
+                SendAddonMessage("AFUI", "LIST", "WHISPER", UnitName("player"))
+            end
+
+            local s = GetSettings()
+            local pageKey = M.pages[s.activeTab]
+            if pageKey and M.selected and (M.autoRefresh ~= false) then
+                local every = 3
+                if s.activeTab == 1 then every = 1.5
+                elseif s.activeTab == 7 then every = 1.5
+                elseif s.activeTab == 8 then every = 10
+                elseif s.activeTab == 9 then every = 3
+                end
+                if (not M.waiting and (now - M.pageAt >= every)) or (M.waiting and (now - M.askedAt >= 10)) then
+                    M.waiting = true
+                    M.askedAt = now
+                    SendAddonMessage("AFUI", "PAGE\t" .. M.selected .. "\t" .. pageKey, "WHISPER", UnitName("player"))
+                end
+            end
+        end
+    end
 end)
 
 -- ----------------------------------------------------------------------------
 -- Slash Commands
 -- ----------------------------------------------------------------------------
+
+SLASH_AZEROTHFRIEND_MONITOR1 = "/afm"
+SLASH_AZEROTHFRIEND_MONITOR2 = "/afmonitor"
+SLASH_AZEROTHFRIEND_MONITOR3 = "/oapm"
+SLASH_AZEROTHFRIEND_MONITOR4 = "/om"
+SlashCmdList["AZEROTHFRIEND_MONITOR"] = function()
+    if AzerothFriendMasterFrame then
+        if AzerothFriendMasterFrame:IsShown() then
+            AzerothFriendMasterFrame:Hide()
+        else
+            AzerothFriendMasterFrame:Show()
+            if RefreshMasterTab then RefreshMasterTab() end
+        end
+    end
+end
 
 SLASH_AZEROTHFRIEND1 = "/af"
 SLASH_AZEROTHFRIEND2 = "/azerothfriend"
@@ -3059,8 +4105,13 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
             AzerothFriendMasterFrame:Show()
             RefreshMasterTab()
         end
-    elseif cmd == "context" or cmd == "env" or cmd == "radar" or cmd == "surroundings" then
+    elseif cmd == "overview" then
         s.activeTab = 1
+        if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
+        if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
+        RefreshMasterTab()
+    elseif cmd == "context" or cmd == "env" or cmd == "radar" or cmd == "surroundings" then
+        s.activeTab = 2
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
         if s.layoutMode == "floating" then
             if AzerothFriendStateFrame then AzerothFriendStateFrame:Show() end
@@ -3070,7 +4121,7 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
         end
         RefreshMasterTab()
     elseif cmd == "debug" or cmd == "mindset" then
-        s.activeTab = 2
+        s.activeTab = 3
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
         if s.layoutMode == "floating" then
             if AzerothFriendMemoryFrame then AzerothFriendMemoryFrame:Show() end
@@ -3079,19 +4130,10 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
         end
         RefreshMasterTab()
     elseif cmd == "actions" then
-        s.activeTab = 3
-        if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
-        if s.layoutMode == "floating" then
-            if AzerothFriendActionFrame then AzerothFriendActionFrame:Show() end
-        else
-            if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
-        end
-        RefreshMasterTab()
-    elseif cmd == "thoughts" or cmd == "thought" or cmd == "memory" then
         s.activeTab = 4
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
         if s.layoutMode == "floating" then
-            if AzerothFriendThoughtFrame then AzerothFriendThoughtFrame:Show() end
+            if AzerothFriendActionFrame then AzerothFriendActionFrame:Show() end
         else
             if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
         end
@@ -3102,6 +4144,32 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
         if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
         RequestBotApiCatalog()
         RefreshMasterTab()
+    elseif cmd == "thoughts" or cmd == "thought" or cmd == "memory" then
+        s.activeTab = 6
+        if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
+        if s.layoutMode == "floating" then
+            if AzerothFriendThoughtFrame then AzerothFriendThoughtFrame:Show() end
+        else
+            if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
+        end
+        RefreshMasterTab()
+    elseif cmd == "travel" or cmd == "errand" or cmd == "autopilot" then
+        s.activeTab = 7
+        if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
+        if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
+        RefreshMasterTab()
+    elseif cmd == "planner" or cmd == "plan" then
+        s.activeTab = 8
+        if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
+        if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
+        RefreshMasterTab()
+    elseif cmd == "events" or cmd == "event" then
+        s.activeTab = 9
+        if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:SetVerticalScroll(0) end
+        if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
+        RefreshMasterTab()
+    elseif cmd == "monitor" or cmd == "m" then
+        if ToggleAzerothFriendMonitor then ToggleAzerothFriendMonitor() end
     elseif cmd == "minimap" then
         s.showMinimap = not s.showMinimap
         if AzerothFriendMinimapButton then
@@ -3245,7 +4313,7 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
         print(COLORS.SUCCESS .. "AzerothFriend UI: Frame position reset." .. COLORS.RESET)
     else
         print(COLORS.HEADER .. "=== AzerothFriend Companion UI Commands ===" .. COLORS.RESET)
-        print(COLORS.SUBHEADER .. "/af" .. COLORS.RESET .. " - Toggle unified Master HUD")
+        print(COLORS.SUBHEADER .. "/af | /afm | /om" .. COLORS.RESET .. " - Toggle unified Master HUD & Monitor")
         print(COLORS.SUBHEADER .. "/af mode <combat|travel|idle|social>" .. COLORS.RESET .. " - Tactical action mode toggle (0 tokens)")
         print(COLORS.SUBHEADER .. "/af attack | /af follow | /af stay | /af flee" .. COLORS.RESET .. " - Instant tactical combat controls")
         print(COLORS.SUBHEADER .. "/af loot [all] | /af open" .. COLORS.RESET .. " - Loot corpses / open items")

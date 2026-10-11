@@ -368,7 +368,15 @@ class ContextBuilder:
         target = state.get("target") or env.get("target")
         if isinstance(target, dict) and target.get("name"):
             lines.append("Own target: %s (HP %s%%)" % (target.get("name"), _fmt_num(target.get("hp_pct"), "?")))
+        autopilot = state.get("autopilot")
+        if isinstance(autopilot, dict) and autopilot.get("enrolled"):
+            lines.append("Autopilot: %s | goal: %s | doing: %s" % (
+                autopilot.get("tier", "enrolled"),
+                autopilot.get("goal_text") or autopilot.get("goal_kind") or "free",
+                autopilot.get("doing") or "adventuring",
+            ))
         return lines
+
 
     def _render_owner(self, owner: Dict[str, Any]) -> List[str]:
         lines = []

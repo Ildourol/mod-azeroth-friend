@@ -974,3 +974,193 @@ AzerothFriend.Grind.SearchRadiusYards = 60.0
 #
 AzerothFriend.Grind.MaxLeashRadiusYards = 90.0
 
+
+###############################################################################
+# AUTONOMOUS AUTOPILOT SUBSYSTEM
+###############################################################################
+
+#
+#   AzerothFriend.Autopilot.Enable
+#       Enable or disable autonomous autopilot operations.
+#       Default: 1
+#
+AzerothFriend.Autopilot.Enable = 1
+
+#
+#   AzerothFriend.Autopilot.Debug
+#       Verbose autopilot debug logging.
+#       Default: 0
+#
+AzerothFriend.Autopilot.Debug = 0
+
+#
+#   AzerothFriend.Autopilot.AllowMasterEnroll
+#       Allow bot masters/owners to enroll their bot via .af autopilot on.
+#       Default: 1
+#
+AzerothFriend.Autopilot.AllowMasterEnroll = 1
+
+#
+#   AzerothFriend.Autopilot.RandomBotPercent
+#       Percent of random bots enrolled into autopilot by default (0-100).
+#       Default: 100
+#
+AzerothFriend.Autopilot.RandomBotPercent = 100
+
+#
+#   AzerothFriend.Autopilot.MinLevel / MaxLevel
+#       Level range for autopilot enrollment rules.
+#       Defaults: 1 / 80
+#
+AzerothFriend.Autopilot.MinLevel = 1
+AzerothFriend.Autopilot.MaxLevel = 80
+
+#
+#   AzerothFriend.Autopilot.MaxEnrolled
+#       Maximum number of concurrently enrolled autopilot bots (0 = unlimited).
+#       Default: 0
+#
+AzerothFriend.Autopilot.MaxEnrolled = 0
+
+#
+#   AzerothFriend.Autopilot.SweepIntervalMs
+#       Interval in milliseconds between autopilot evaluation sweeps.
+#       Default: 1000
+#
+AzerothFriend.Autopilot.SweepIntervalMs = 1000
+
+#
+#   AzerothFriend.Autopilot.BotsPerSweep
+#       Number of candidate bots checked per sweep slice.
+#       Default: 25
+#
+AzerothFriend.Autopilot.BotsPerSweep = 25
+
+#
+#   AzerothFriend.Autopilot.SnapshotIntervalMinutes
+#       Interval in minutes between durable progress snapshots.
+#       Default: 10
+#
+AzerothFriend.Autopilot.SnapshotIntervalMinutes = 10
+
+#
+#   AzerothFriend.Autopilot.FlushIntervalSeconds
+#       Interval in seconds between batched snapshot/event database flushes.
+#       Default: 60
+#
+AzerothFriend.Autopilot.FlushIntervalSeconds = 60
+
+#
+#   AzerothFriend.Autopilot.Control
+#       Allow autopilot to execute physical bot actions and movement.
+#       Default: 1
+#
+AzerothFriend.Autopilot.Control = 1
+
+#
+#   AzerothFriend.Autopilot.NoTeleport
+#       Prevent periodic random-bot teleports so bots travel realistically.
+#       Default: 1
+#
+AzerothFriend.Autopilot.NoTeleport = 1
+
+#
+#   AzerothFriend.Autopilot.NoRandomize
+#       Prevent random-bot engine re-rolls and stat wipes.
+#       Default: 1
+#
+AzerothFriend.Autopilot.NoRandomize = 1
+
+#
+#   AzerothFriend.Autopilot.NoHandouts
+#       Disable free level-up gear, spirit healer revives, and supplies.
+#       Default: 1
+#
+AzerothFriend.Autopilot.NoHandouts = 1
+
+#
+#   AzerothFriend.Autopilot.KeepOnline
+#       Keep enrolled random bots logged into the game world.
+#       Default: 1
+#
+AzerothFriend.Autopilot.KeepOnline = 1
+
+#
+#   AzerothFriend.Autopilot.CorpseRunMinutes
+#       Maximum minutes to attempt ghost corpse run before spirit healer resurrection.
+#       Default: 10
+#
+AzerothFriend.Autopilot.CorpseRunMinutes = 10
+
+###############################################################################
+# PASSER-BY BUFFS & EMOTE EMBODIMENT
+###############################################################################
+
+#
+#   AzerothFriend.Buff.Enable
+#       Enable passer-by buffing from learned spellbook.
+#       Default: 1
+#
+AzerothFriend.Buff.Enable = 1
+
+#
+#   AzerothFriend.Buff.Range
+#       Maximum search distance in yards for friendly passer-bys.
+#       Default: 25.0
+#
+AzerothFriend.Buff.Range = 25.0
+
+#
+#   AzerothFriend.Buff.BotsPerSecond
+#       Rate limit of bots evaluated for passer-by buffing per second.
+#       Default: 15
+#
+AzerothFriend.Buff.BotsPerSecond = 15
+
+#
+#   AzerothFriend.Buff.MinIntervalSeconds / MaxIntervalSeconds
+#       Interval bounds between buffs cast by the same bot.
+#       Defaults: 8 / 20
+#
+AzerothFriend.Buff.MinIntervalSeconds = 8
+AzerothFriend.Buff.MaxIntervalSeconds = 20
+
+#
+#   AzerothFriend.Buff.BuffBots
+#       Allow buffing friendly bot characters in addition to human players.
+#       Default: 1
+#
+AzerothFriend.Buff.BuffBots = 1
+
+#
+#   AzerothFriend.Buff.MinManaPct
+#       Minimum mana percentage required before offering buffs.
+#       Default: 40
+#
+AzerothFriend.Buff.MinManaPct = 40
+
+#
+#   AzerothFriend.Buff.WaveChance
+#       Percentage chance to wave/gesture after casting a passer-by buff (0-100).
+#       Default: 25
+#
+AzerothFriend.Buff.WaveChance = 25
+
+###############################################################################
+# MONITOR & CLIENT ADDON PROTOCOL
+###############################################################################
+
+#
+#   AzerothFriend.Monitor.Enable
+#       Enable server-side whisper communication for the companion monitor HUD.
+#       Default: 1
+#
+AzerothFriend.Monitor.Enable = 1
+
+#
+#   AzerothFriend.Monitor.MinSecurity
+#       Minimum account security level to query monitor pages and telemetry.
+#       0 = SEC_PLAYER, 1 = SEC_MODERATOR, 2 = SEC_GAMEMASTER, 3 = SEC_ADMINISTRATOR
+#       Default: 0
+#
+AzerothFriend.Monitor.MinSecurity = 0

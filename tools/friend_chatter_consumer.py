@@ -429,6 +429,37 @@ class ChatterSensoryConsumer:
                         if not is_recent_dup:
                             self._note_dialogue(bot_guid, sender, speaker_tag, channel, msg_text, is_master)
 
+                        if "[request:" in clean_text:
+                            import re
+                            req_m = re.search(r"\[request:\s*([^\]]+)\]", msg_text, re.IGNORECASE)
+                            if req_m:
+                                req_body = req_m.group(1).strip()
+                                req_payload = json.dumps({
+                                    "speaker": speaker_tag,
+                                    "raw_speaker": sender,
+                                    "text": req_body,
+                                    "channel": channel,
+                                    "is_master": is_master,
+                                    "is_request": True,
+                                })
+                                cursor.execute(
+                                    """
+                                    INSERT INTO `azeroth_friend_events`
+                                    (`bot_guid`, `event_type`, `priority`, `source_guid`, `source_name`, `payload_json`, `status`)
+                                    SELECT %s, 'player_command', 1, %s, %s, %s, 'pending'
+                                    FROM `azeroth_friend_bots`
+                                    WHERE `bot_guid` = %s AND `enabled` = 1 AND `bridge_enabled` = 1
+                                      AND `control_revision` = %s
+                                    """,
+                                    (bot_guid, subj_guid or 0, sender, req_payload, bot_guid, control_revision),
+                                )
+                                actions_created += 1
+                                logger.info(
+                                    "[ChatterConsumer] Extracted [request: %s] from %s; queued as high-priority command",
+                                    req_body, sender
+                                )
+
+
                         # Player speech (master or party member) in party/whisper/say is ALREADY
                         # captured directly by AzerothFriendChatHook.cpp in C++ (preventing double hearing).
                         # Only insert dialogue_heard into azeroth_friend_events for NPC speech

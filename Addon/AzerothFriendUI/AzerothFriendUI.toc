@@ -1,10 +1,12 @@
 ## Interface: 30300
 ## Title: |cFF00BFFFAzerothFriend|r UI
-## Notes: Companion HUD with live state, cognition, action pipeline, and Playerbot Semantic Bot API v1 inspection.
+## Notes: Companion HUD with live state, cognition, action pipeline, Autopilot Monitor, and Playerbot Semantic Bot API v1 inspection.
 ## Author: mod-azeroth-friend
-## Version: 1.1.0
+## Version: 1.3.0
 ## SavedVariables: AzerothFriendUIDB
 AzerothFriendProtocol.lua
+AzerothFriendMonitor.lua
 AzerothFriendUI.lua
 AzerothFriendUI.xml
 AzerothFriendGoals.lua
+

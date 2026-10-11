@@ -9,6 +9,8 @@
 #include "AzerothFriendSnapshotMemory.h"
 #include "AzerothFriendEnvironment.h"
 #include "AzerothFriendLiveState.h"
+#include "AzerothFriendAutopilot.h"
+#include "AzerothFriendProgress.h"
 #include "Chat.h"
 #include "DatabaseEnv.h"
 #include "ObjectAccessor.h"
@@ -22,6 +24,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
 
 namespace AzerothFriend
 {
@@ -1496,6 +1499,109 @@ namespace AzerothFriend
                 }
             }
         }
+
+        void HandleAutopilot(ChatHandler* handler, std::string& rest)
+        {
+            std::string sub = TakeWord(rest);
+            if (sub.empty() || sub == "help")
+            {
+                handler->SendSysMessage("=== AzerothFriend Autopilot Commands ===");
+                handler->SendSysMessage(".af autopilot status [bot]  - Status of bot autopilot enrollment and tier");
+                handler->SendSysMessage(".af autopilot on [bot]      - Force autopilot ON for bot");
+                handler->SendSysMessage(".af autopilot off [bot]     - Force autopilot OFF for bot");
+                handler->SendSysMessage(".af autopilot list          - List all enrolled autopilot bots");
+                handler->SendSysMessage(".af autopilot diary [bot]   - Display bot progress history and summary");
+                handler->SendSysMessage(".af autopilot plan [bot]    - Request immediate replan from Python bridge");
+                return;
+            }
+
+            if (sub == "status")
+            {
+                std::string name = TakeWord(rest);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                if (!bot)
+                {
+                    handler->SendSysMessage("Bot not found.");
+                    return;
+                }
+                handler->PSendSysMessage("Autopilot [%s]: Active: %s | Context: %s",
+                                         bot->GetName().c_str(),
+                                         Autopilot_IsActive() ? "YES" : "NO",
+                                         Autopilot_ChatContext(bot).c_str());
+                return;
+            }
+
+            if (sub == "on")
+            {
+                std::string name = TakeWord(rest);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                if (!bot)
+                {
+                    handler->SendSysMessage("Bot not found.");
+                    return;
+                }
+                Autopilot_MonitorCommand(handler->GetPlayer(), "on", bot->GetName());
+                return;
+            }
+
+            if (sub == "off")
+            {
+                std::string name = TakeWord(rest);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                if (!bot)
+                {
+                    handler->SendSysMessage("Bot not found.");
+                    return;
+                }
+                Autopilot_MonitorCommand(handler->GetPlayer(), "off", bot->GetName());
+                return;
+            }
+
+            if (sub == "list")
+            {
+                auto list = Autopilot_MonitorList();
+                handler->PSendSysMessage("=== Enrolled Autopilot Bots (%u) ===", static_cast<uint32>(list.size()));
+                for (const auto& row : list)
+                {
+                    handler->PSendSysMessage("- %s (L%u): %s [%s, %s]",
+                                             row.name.c_str(), uint32(row.level), row.doing.c_str(),
+                                             row.tier.c_str(), row.state.c_str());
+                }
+                return;
+            }
+
+            if (sub == "diary")
+            {
+                std::string name = TakeWord(rest);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                if (!bot)
+                {
+                    handler->SendSysMessage("Bot not found.");
+                    return;
+                }
+                auto snapshots = AzerothFriendProgress::LoadSnapshots(bot->GetGUID().GetRawValue(), 0, 10);
+                std::string summary = AzerothFriendProgress::Summarize(snapshots);
+                handler->PSendSysMessage("=== Progress Diary: %s ===", bot->GetName().c_str());
+                handler->SendSysMessage(summary.empty() ? "No recent progress summary available." : summary.c_str());
+                return;
+            }
+
+            if (sub == "plan")
+            {
+                std::string name = TakeWord(rest);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                if (!bot)
+                {
+                    handler->SendSysMessage("Bot not found.");
+                    return;
+                }
+                AzerothFriendProgress::QueueEvent(bot->GetGUID().GetRawValue(), "replan", "Operator requested immediate replan");
+                handler->PSendSysMessage("Queued replan request for %s.", bot->GetName().c_str());
+                return;
+            }
+
+            handler->SendSysMessage("Unknown autopilot subcommand. Use '.af autopilot help'.");
+        }
     }
 
     class AzerothFriendCommandScript final : public AllCommandScript
@@ -1522,6 +1628,11 @@ namespace AzerothFriend
             std::string rest = arguments;
             std::string subcommand = TakeWord(rest);
 
+            if (subcommand == "autopilot")
+            {
+                HandleAutopilot(&handler, rest);
+                return false;
+            }
             if (subcommand == "goal" || subcommand == "autonomy")
             {
                 HandleGoal(&handler, rest, subcommand == "autonomy");
@@ -1665,6 +1776,7 @@ namespace AzerothFriend
             handler.SendSysMessage("=== AzerothFriend Commands ===");
             handler.SendSysMessage(".af status              - Monitor background bridge, RAM/SQL status, and tokens saved");
             handler.SendSysMessage(".af inspect [bot]       - Broadcast zero-token live context & mindset telemetry to Addon");
+            handler.SendSysMessage(".af autopilot [cmd]     - Autonomous bot behavior, errands, goals, and progress diary");
             handler.SendSysMessage(".af goal [bot] set <text>|longterm <text>|generate [both|long|short]|show|pause|resume|complete|clear - Manage companion goals");
             handler.SendSysMessage(".af autonomy [bot] on|off|status - Opt-in self-directed operation (needs a goal)");
             handler.SendSysMessage(".af thinking [low|normal|high] - Configure thinking cadence tier");

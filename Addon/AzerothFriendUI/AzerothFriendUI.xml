@@ -327,9 +327,9 @@
 
     <!-- 6. Unified Tabbed Master HUD Frame -->
     <Frame name="AzerothFriendMasterFrame" parent="UIParent" movable="true" enableMouse="true" resizable="true" frameStrata="HIGH" hidden="true">
-        <Size><AbsDimension x="660" y="440"/></Size>
+        <Size><AbsDimension x="980" y="620"/></Size>
         <Anchors>
-            <Anchor point="CENTER" x="0" y="50"/>
+            <Anchor point="CENTER" x="0" y="20"/>
         </Anchors>
         <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
             <BackgroundInsets><AbsInset left="4" right="4" top="4" bottom="4"/></BackgroundInsets>
@@ -343,18 +343,18 @@
                     <Anchor point="TOPLEFT" x="4" y="-4"/>
                     <Anchor point="TOPRIGHT" x="-4" y="-4"/>
                 </Anchors>
-                <Size><AbsDimension x="0" y="26"/></Size>
+                <Size><AbsDimension x="0" y="28"/></Size>
                 <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background-Dark" tile="true">
                     <TileSize><AbsValue val="16"/></TileSize>
                 </Backdrop>
                 <Layers>
                     <Layer level="OVERLAY">
-                        <FontString name="AzerothFriendMasterFrameTitle" inherits="GameFontNormal" text="AzerothFriend: Companion HUD &amp; Context">
+                        <FontString name="AzerothFriendMasterFrameTitle" inherits="GameFontNormal" text="AzerothFriend Companion &amp; Autopilot HUD">
                             <Anchors>
                                 <Anchor point="LEFT" x="12" y="0"/>
                             </Anchors>
                         </FontString>
-                        <FontString name="AzerothFriendMasterFrameSubtitle" inherits="GameFontHighlightSmall" text="|cff00ccff[Zero-Token Diagnostics]|r">
+                        <FontString name="AzerothFriendMasterFrameSubtitle" inherits="GameFontHighlightSmall" text="|cff00ccff[Unified Tactical Monitor]|r">
                             <Anchors>
                                 <Anchor point="RIGHT" x="-32" y="0"/>
                             </Anchors>
@@ -373,51 +373,75 @@
                 </Scripts>
             </Button>
 
-            <!-- Navigation Tabs -->
-            <Button name="AzerothFriendMasterTab1" inherits="UIPanelButtonTemplate" text="Context">
-                <Size><AbsDimension x="130" y="22"/></Size>
+            <!-- 9 Navigation Tabs -->
+            <Button name="AzerothFriendMasterTab1" inherits="UIPanelButtonTemplate" text="Overview">
+                <Size><AbsDimension x="74" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="TOPLEFT" x="8" y="-34"/>
+                    <Anchor point="TOPLEFT" x="296" y="-120"/>
                 </Anchors>
             </Button>
-            <Button name="AzerothFriendMasterTab2" inherits="UIPanelButtonTemplate" text="Mindset/Debug">
-                <Size><AbsDimension x="115" y="22"/></Size>
+            <Button name="AzerothFriendMasterTab2" inherits="UIPanelButtonTemplate" text="Context">
+                <Size><AbsDimension x="68" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab1" relativePoint="RIGHT" x="4" y="0"/>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab1" relativePoint="RIGHT" x="2" y="0"/>
                 </Anchors>
             </Button>
-            <Button name="AzerothFriendMasterTab3" inherits="UIPanelButtonTemplate" text="Actions">
-                <Size><AbsDimension x="95" y="22"/></Size>
+            <Button name="AzerothFriendMasterTab3" inherits="UIPanelButtonTemplate" text="Mindset">
+                <Size><AbsDimension x="68" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab2" relativePoint="RIGHT" x="4" y="0"/>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab2" relativePoint="RIGHT" x="2" y="0"/>
                 </Anchors>
             </Button>
-            <Button name="AzerothFriendMasterTab4" inherits="UIPanelButtonTemplate" text="Thoughts">
-                <Size><AbsDimension x="95" y="22"/></Size>
+            <Button name="AzerothFriendMasterTab4" inherits="UIPanelButtonTemplate" text="Actions">
+                <Size><AbsDimension x="66" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab3" relativePoint="RIGHT" x="4" y="0"/>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab3" relativePoint="RIGHT" x="2" y="0"/>
                 </Anchors>
             </Button>
             <Button name="AzerothFriendMasterTab5" inherits="UIPanelButtonTemplate" text="Bot API v1">
-                <Size><AbsDimension x="100" y="22"/></Size>
+                <Size><AbsDimension x="82" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab4" relativePoint="RIGHT" x="4" y="0"/>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab4" relativePoint="RIGHT" x="2" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab6" inherits="UIPanelButtonTemplate" text="Thoughts">
+                <Size><AbsDimension x="76" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab5" relativePoint="RIGHT" x="2" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab7" inherits="UIPanelButtonTemplate" text="Travel">
+                <Size><AbsDimension x="60" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab6" relativePoint="RIGHT" x="2" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab8" inherits="UIPanelButtonTemplate" text="Planner">
+                <Size><AbsDimension x="68" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab7" relativePoint="RIGHT" x="2" y="0"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendMasterTab9" inherits="UIPanelButtonTemplate" text="Events">
+                <Size><AbsDimension x="64" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendMasterTab8" relativePoint="RIGHT" x="2" y="0"/>
                 </Anchors>
             </Button>
 
-            <!-- Content Area -->
+            <!-- Content Area ScrollFrame -->
             <ScrollFrame name="AzerothFriendMasterScrollFrame" inherits="UIPanelScrollFrameTemplate">
                 <Anchors>
-                    <Anchor point="TOPLEFT" x="12" y="-62"/>
-                    <Anchor point="BOTTOMRIGHT" x="-28" y="38"/>
+                    <Anchor point="TOPLEFT" x="296" y="-146"/>
+                    <Anchor point="BOTTOMRIGHT" x="-26" y="44"/>
                 </Anchors>
                 <ScrollChild>
                     <Frame name="AzerothFriendMasterHTML">
-                        <Size><AbsDimension x="600" y="330"/></Size>
+                        <Size><AbsDimension x="650" y="460"/></Size>
                         <Layers>
                             <Layer level="ARTWORK">
                                 <FontString name="AzerothFriendMasterHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
-                                    <Size><AbsDimension x="600" y="0"/></Size>
+                                    <Size><AbsDimension x="650" y="0"/></Size>
                                     <Anchors>
                                         <Anchor point="TOPLEFT" x="0" y="0"/>
                                     </Anchors>
@@ -428,11 +452,11 @@
                 </ScrollChild>
             </ScrollFrame>
 
-            <!-- Bottom Remote Control Bar: Tactical Action Modes & Utility -->
+            <!-- Row 1 Tactical Action Modes & Switches -->
             <Button name="AzerothFriendBtnModeCombat" inherits="UIPanelButtonTemplate" text="Combat">
                 <Size><AbsDimension x="62" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="BOTTOMLEFT" x="8" y="8"/>
+                    <Anchor point="TOPLEFT" x="296" y="-70"/>
                 </Anchors>
             </Button>
             <Button name="AzerothFriendBtnModeTravel" inherits="UIPanelButtonTemplate" text="Travel">
@@ -465,28 +489,22 @@
                     <Anchor point="LEFT" relativeTo="AzerothFriendBtnSync" relativePoint="RIGHT" x="4" y="0"/>
                 </Anchors>
             </Button>
-
-            <!-- Autonomy switch: owner opt-in for self-directed play (server-confirmed) -->
+            <Button name="AzerothFriendBtnThinking" inherits="UIPanelButtonTemplate" text="Think: LOW">
+                <Size><AbsDimension x="78" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="TOPRIGHT" x="-162" y="-70"/>
+                </Anchors>
+            </Button>
+            <Button name="AzerothFriendBtnClaim" inherits="UIPanelButtonTemplate" text="Claim: OFF">
+                <Size><AbsDimension x="74" y="22"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendBtnThinking" relativePoint="RIGHT" x="4" y="0"/>
+                </Anchors>
+            </Button>
             <Button name="AzerothFriendBtnAutonomy" inherits="UIPanelButtonTemplate" text="Auto: OFF">
                 <Size><AbsDimension x="72" y="22"/></Size>
                 <Anchors>
-                    <Anchor point="BOTTOMRIGHT" x="-10" y="8"/>
-                </Anchors>
-            </Button>
-
-            <!-- Claim switch: companion agency lock (indefinite until released) -->
-            <Button name="AzerothFriendBtnClaim" inherits="UIPanelButtonTemplate" text="Claim: OFF">
-                <Size><AbsDimension x="72" y="22"/></Size>
-                <Anchors>
-                    <Anchor point="RIGHT" relativeTo="AzerothFriendBtnAutonomy" relativePoint="LEFT" x="-6" y="0"/>
-                </Anchors>
-            </Button>
-
-            <!-- Thinking cadence switch: Low (20s) | Normal (10s) | High (4s) -->
-            <Button name="AzerothFriendBtnThinking" inherits="UIPanelButtonTemplate" text="Think: LOW">
-                <Size><AbsDimension x="80" y="22"/></Size>
-                <Anchors>
-                    <Anchor point="RIGHT" relativeTo="AzerothFriendBtnClaim" relativePoint="LEFT" x="-6" y="0"/>
+                    <Anchor point="LEFT" relativeTo="AzerothFriendBtnClaim" relativePoint="RIGHT" x="4" y="0"/>
                 </Anchors>
             </Button>
         </Frames>
