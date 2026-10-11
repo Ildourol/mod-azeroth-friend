@@ -450,11 +450,10 @@ namespace AzerothFriendRoute
         g_rc.waterCost       = sConfigMgr->GetOption<float>("AzerothFriend.Autopilot.Route.WaterCost", 20.0f);
     }
 
-    void Filter(Player* bot, PathGenerator& generator)
+    void Filter(Player* /*bot*/, PathGenerator& generator)
     {
-        generator.SetUseFilter(NAV_GROUND | NAV_WATER);
-        generator.SetExcludeFilter(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
-        generator.SetAreaCost(NAV_WATER, std::max(10.0f, g_rc.waterCost));
+        generator.SetExcludeFlags(NAV_MAGMA | NAV_SLIME | NAV_GROUND_STEEP);
+        generator.SetNavTerrainCost(NAV_WATER, std::max(10.0f, g_rc.waterCost));
     }
 
     bool ClimbsOnlyWhereWet(Player* bot, const Movement::PointsArray& points)
@@ -466,7 +465,7 @@ namespace AzerothFriendRoute
             const float dxy = std::hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
             if (dxy > 0.1f && dz / dxy > 0.8f) // steep
             {
-                if (!map || !map->IsInWater(points[i].x, points[i].y, points[i].z, bot->GetCollisionHeight()))
+                if (!map || !map->IsInWater(bot->GetPhaseMask(), points[i].x, points[i].y, points[i].z, bot->GetCollisionHeight()))
                     return false;
             }
         }

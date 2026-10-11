@@ -527,32 +527,22 @@ namespace
 
             case AutopilotLegType::Approach:
             {
-                Creature* c = bot->GetNPCIfCanInteractWith(ObjectGuid(HighGuid::Unit, leg.entry, 0), UNIT_NPC_FLAG_NONE);
-                if (!c)
+                Creature* c = nullptr;
+                float bestD = FLT_MAX;
+                if (Map* map = bot->GetMap())
                 {
-                    // Search near
-                    float bestD = FLT_MAX;
-                    Creature* bestC = nullptr;
-                    CellCoord p(Acore::ComputeCellCoord(bot->GetPositionX(), bot->GetPositionY()));
-                    Cell cell(p);
-                    cell.SetNoLoader();
-                    Map* map = bot->GetMap();
-                    if (map)
+                    for (auto const& [guid, creature] : map->GetCreatureBySpawnIdStore())
                     {
-                        for (auto const& [guid, creature] : map->GetCreatureBySpawnIdStore())
+                        if (creature && creature->GetEntry() == leg.entry && creature->IsAlive())
                         {
-                            if (creature && creature->GetEntry() == leg.entry && creature->IsAlive())
+                            float d = bot->GetDistance(creature);
+                            if (d < bestD)
                             {
-                                float d = bot->GetDistance(creature);
-                                if (d < bestD)
-                                {
-                                    bestD = d;
-                                    bestC = creature;
-                                }
+                                bestD = d;
+                                c = creature;
                             }
                         }
                     }
-                    c = bestC;
                 }
                 if (!c)
                     return Step::Arrived;
@@ -761,9 +751,9 @@ namespace AzerothFriendTravel
             std::vector<size_t> stops;
             for (auto const& kf : transport.keyFrames)
             {
-                if (kf.IsStopFrame() && IsContinent(kf.Node->MapID))
+                if (kf.IsStopFrame() && IsContinent(kf.Node->mapid))
                 {
-                    size_t d = AddDock(kf.Node->MapID, kf.Node->X, kf.Node->Y, kf.Node->Z);
+                    size_t d = AddDock(kf.Node->mapid, kf.Node->x, kf.Node->y, kf.Node->z);
                     stops.push_back(d);
                 }
             }
@@ -776,7 +766,8 @@ namespace AzerothFriendTravel
                     Crossing c;
                     c.kind  = CrossKind::Transport;
                     c.entry = entry;
-                    c.name  = transport.name;
+                    GameObjectTemplate const* goInfo = sObjectMgr->GetGameObjectTemplate(entry);
+                    c.name  = goInfo ? goInfo->name : "Transport";
                     c.from  = stops[i];
                     c.to    = stops[next];
                     g_crossings.push_back(c);

@@ -1518,7 +1518,7 @@ namespace AzerothFriend
             if (sub == "status")
             {
                 std::string name = TakeWord(rest);
-                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindPlayerByName(name);
                 if (!bot)
                 {
                     handler->SendSysMessage("Bot not found.");
@@ -1534,7 +1534,7 @@ namespace AzerothFriend
             if (sub == "on")
             {
                 std::string name = TakeWord(rest);
-                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindPlayerByName(name);
                 if (!bot)
                 {
                     handler->SendSysMessage("Bot not found.");
@@ -1547,7 +1547,7 @@ namespace AzerothFriend
             if (sub == "off")
             {
                 std::string name = TakeWord(rest);
-                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindPlayerByName(name);
                 if (!bot)
                 {
                     handler->SendSysMessage("Bot not found.");
@@ -1573,7 +1573,7 @@ namespace AzerothFriend
             if (sub == "diary")
             {
                 std::string name = TakeWord(rest);
-                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindPlayerByName(name);
                 if (!bot)
                 {
                     handler->SendSysMessage("Bot not found.");
@@ -1589,7 +1589,7 @@ namespace AzerothFriend
             if (sub == "plan")
             {
                 std::string name = TakeWord(rest);
-                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindConnectedPlayerByName(name);
+                Player* bot = name.empty() ? handler->GetPlayer() : ObjectAccessor::FindPlayerByName(name);
                 if (!bot)
                 {
                     handler->SendSysMessage("Bot not found.");

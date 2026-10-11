@@ -18,7 +18,7 @@ namespace AzerothFriendMovement
     void Hold(PlayerbotAI* ai, uint32_t ms, bool overCombat);
     bool IsMoving(PlayerbotAI* ai);
     void Stop(PlayerbotAI* ai);
-    bool Yield(PlayerbotAI* ai);
+    bool YieldEscort(PlayerbotAI* ai);
     bool TalkTo(PlayerbotAI* ai, Creature* npc);
 }
 

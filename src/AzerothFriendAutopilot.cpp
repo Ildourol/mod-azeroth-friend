@@ -194,10 +194,12 @@ namespace
 #endif
     }
 
+#if !AF_HAS_PLAYERBOTS
     bool IsRealPlayer(Player* player)
     {
-        return player && !IsBotPlayer(player);
+        return player != nullptr;
     }
+#endif
 
     Tier CalculateTier(Player* bot)
     {
@@ -206,7 +208,7 @@ namespace
 
         for (auto const& [guid, player] : ObjectAccessor::GetPlayers())
         {
-            if (!player || !IsRealPlayer(player) || !player->IsInWorld())
+            if (!player || !::IsRealPlayer(player) || !player->IsInWorld())
                 continue;
 
             if (player->GetMapId() == bot->GetMapId())
@@ -226,7 +228,7 @@ namespace
 
     void HandleCorpseRun(Player* bot, OnlineState& state, uint32_t now)
     {
-        if (!bot->IsDead())
+        if (bot->IsAlive())
         {
             state.corpseRunActive = false;
             return;
@@ -263,7 +265,11 @@ namespace
             return;
         }
 
-        AzerothFriendMovement::Move_To(bot, corpse->GetPositionX(), corpse->GetPositionY(), corpse->GetPositionZ(), true);
+#if AF_HAS_PLAYERBOTS
+        AzerothFriendMovement::MoveTo(GET_PLAYERBOT_AI(bot), corpse->GetPositionX(), corpse->GetPositionY(), corpse->GetPositionZ(), true);
+#else
+        (void)corpse;
+#endif
     }
 
     void SweepBot(Player* bot, uint32_t now)
@@ -304,7 +310,7 @@ namespace
 
         state.tier = CalculateTier(bot);
 
-        if (bot->IsDead())
+        if (!bot->IsAlive())
         {
             HandleCorpseRun(bot, state, now);
             return;
@@ -318,7 +324,9 @@ namespace
 
         if (g_cfg.control)
         {
-            AzerothFriendErrands::Step(bot, 1000);
+#if AF_HAS_PLAYERBOTS
+            AzerothFriendErrands::UpdateErrand(bot, GET_PLAYERBOT_AI(bot), state.currentErrand, now);
+#endif
         }
     }
 }
@@ -349,7 +357,7 @@ void Autopilot_LoadConfig()
 void Autopilot_Load()
 {
     AzerothFriendAutopilotSchema::EnsureTables();
-    AzerothFriendStrategy::Load();
+    AzerothFriendStrategy::Register();
     Autopilot_LoadConfig();
 
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -540,7 +548,7 @@ std::vector<AutopilotMonitorRow> Autopilot_MonitorList()
                 row.state = "fighting";
             else if (bot->HasPlayerFlag(PLAYER_FLAGS_GHOST))
                 row.state = "corpse run";
-            else if (bot->IsDead())
+            else if (!bot->IsAlive())
                 row.state = "dead";
             else if (bot->IsInFlight())
                 row.state = "flying";
@@ -581,7 +589,7 @@ std::vector<AutopilotMonitorRow> Autopilot_MonitorList()
             row.state = "fighting";
         else if (bot->HasPlayerFlag(PLAYER_FLAGS_GHOST))
             row.state = "corpse run";
-        else if (bot->IsDead())
+        else if (!bot->IsAlive())
             row.state = "dead";
         else if (bot->IsInFlight())
             row.state = "flying";
@@ -720,7 +728,7 @@ bool Autopilot_MonitorCommand(Player* gm, const std::string& sub, const std::str
     if (!gm)
         return false;
 
-    Player* bot = ObjectAccessor::FindConnectedPlayerByName(name);
+    Player* bot = ObjectAccessor::FindPlayerByName(name, false);
     if (!bot || !IsBotPlayer(bot))
     {
         ChatHandler(gm->GetSession()).SendSysMessage("Bot not found or not a valid playerbot.");
@@ -764,7 +772,7 @@ public:
     {
         Player* bot = nullptr;
         if (name)
-            bot = ObjectAccessor::FindConnectedPlayerByName(*name);
+            bot = ObjectAccessor::FindPlayerByName(*name, false);
         else
             bot = handler->GetPlayer();
 
@@ -791,7 +799,7 @@ public:
 
     static bool HandleAutopilotOnCommand(ChatHandler* handler, Optional<std::string> name)
     {
-        Player* bot = name ? ObjectAccessor::FindConnectedPlayerByName(*name) : handler->GetPlayer();
+        Player* bot = name ? ObjectAccessor::FindPlayerByName(*name, false) : handler->GetPlayer();
         if (!bot || !IsBotPlayer(bot))
         {
             handler->SendSysMessage("Specify a valid playerbot.");
@@ -812,7 +820,7 @@ public:
 
     static bool HandleAutopilotOffCommand(ChatHandler* handler, Optional<std::string> name)
     {
-        Player* bot = name ? ObjectAccessor::FindConnectedPlayerByName(*name) : handler->GetPlayer();
+        Player* bot = name ? ObjectAccessor::FindPlayerByName(*name, false) : handler->GetPlayer();
         if (!bot || !IsBotPlayer(bot))
         {
             handler->SendSysMessage("Specify a valid playerbot.");
@@ -855,10 +863,10 @@ Acore::ChatCommands::ChatCommandTable const& Autopilot_CommandTable()
 {
     static Acore::ChatCommands::ChatCommandTable const autopilotCommandTable =
     {
-        { "status", HandleAutopilotStatusCommand, SEC_PLAYER, Console::No },
-        { "on",     HandleAutopilotOnCommand,     SEC_GAMEMASTER, Console::No },
-        { "off",    HandleAutopilotOffCommand,    SEC_GAMEMASTER, Console::No },
-        { "list",   HandleAutopilotListCommand,   SEC_PLAYER, Console::No }
+        { "status", AutopilotChatCommands::HandleAutopilotStatusCommand, SEC_PLAYER,     Console::No },
+        { "on",     AutopilotChatCommands::HandleAutopilotOnCommand,     SEC_GAMEMASTER, Console::No },
+        { "off",    AutopilotChatCommands::HandleAutopilotOffCommand,    SEC_GAMEMASTER, Console::No },
+        { "list",   AutopilotChatCommands::HandleAutopilotListCommand,   SEC_PLAYER,     Console::No }
     };
     return autopilotCommandTable;
 }
@@ -870,7 +878,7 @@ Acore::ChatCommands::ChatCommandTable const& Autopilot_CommandTable()
 AutopilotPlayerScript::AutopilotPlayerScript()
     : PlayerScript("AutopilotPlayerScript",
                    { PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_CREATURE_KILL,
-                     PLAYERHOOK_ON_JUST_DIED, PLAYERHOOK_ON_LEVEL_CHANGED })
+                     PLAYERHOOK_ON_PLAYER_JUST_DIED, PLAYERHOOK_ON_LEVEL_CHANGED })
 {
 }
 
@@ -987,7 +995,7 @@ void AutopilotPlayerScript::OnPlayerAchievementComplete(Player* player, Achievem
         return;
 
     const uint64_t guid = player->GetGUID().GetRawValue();
-    AzerothFriendProgress::QueueEvent(guid, "achievement", achievement->title[0]);
+    AzerothFriendProgress::QueueEvent(guid, "achievement", achievement->name[LOCALE_enUS]);
 }
 
 void AutopilotPlayerScript::OnPlayerDeleteFromDB(CharacterDatabaseTransaction trans, uint32 lowGuid)

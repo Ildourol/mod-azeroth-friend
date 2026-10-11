@@ -271,10 +271,8 @@ namespace AzerothFriendStrategy
 #if AF_HAS_PLAYERBOTS
         if (!ai)
             return false;
-        LootObject target(ai->GetBot(), ObjectGuid(objectGuid));
-        if (target.IsEmpty())
-            return false;
-        ai->GetAiObjectContext()->GetValue<LootObject>("loot target")->Set(target);
+        if (LootObjectStack* stack = ai->GetAiObjectContext()->GetValue<LootObjectStack*>("available loot")->Get())
+            stack->Add(ObjectGuid(objectGuid));
         return ai->DoSpecificAction("open loot", Event(), true);
 #else
         (void)ai; (void)objectGuid;
@@ -294,4 +292,25 @@ namespace AzerothFriendStrategy
         (void)ai;
 #endif
     }
+
+    void AutopilotStrategy_Apply(Player* bot)
+    {
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+            ai->ChangeStrategy(std::string("+") + AUTOPILOT_STRATEGY_NAME, BOT_STATE_NON_COMBAT);
+#else
+        (void)bot;
+#endif
+    }
+
+    void AutopilotStrategy_Remove(Player* bot)
+    {
+#if AF_HAS_PLAYERBOTS
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+            ai->ChangeStrategy(std::string("-") + AUTOPILOT_STRATEGY_NAME, BOT_STATE_NON_COMBAT);
+#else
+        (void)bot;
+#endif
+    }
 }
+

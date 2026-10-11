@@ -1,17 +1,13 @@
 #ifndef MOD_AZEROTH_FRIEND_ERRANDS_H
 #define MOD_AZEROTH_FRIEND_ERRANDS_H
 
+#include "AzerothFriendPlayerbot.h"
 #include "AzerothFriendTravel.h"
 #include <cstdint>
 #include <string>
 #include <vector>
 
 class Player;
-#if AF_HAS_PLAYERBOTS
-class PlayerbotAI;
-#else
-class PlayerbotAI {};
-#endif
 
 enum class AutopilotErrandKind : uint8_t
 {

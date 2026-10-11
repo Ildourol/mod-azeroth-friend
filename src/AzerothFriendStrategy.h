@@ -26,6 +26,8 @@ namespace AzerothFriendStrategy
     bool EngageQuestTarget(PlayerbotAI* ai);
     void LootObject(PlayerbotAI* ai, uint64_t objectGuid);
     bool OpenObject(PlayerbotAI* ai, uint64_t objectGuid);
+    void AutopilotStrategy_Apply(Player* bot);
+    void AutopilotStrategy_Remove(Player* bot);
 }
 
 #endif // MOD_AZEROTH_FRIEND_STRATEGY_H

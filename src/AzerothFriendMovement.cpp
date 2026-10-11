@@ -7,7 +7,7 @@
 #if AF_HAS_PLAYERBOTS
 #include "PlayerbotAI.h"
 #include "AiObjectContext.h"
-#include "LastMovement.h"
+#include "LastMovementValue.h"
 
 namespace
 {
@@ -135,7 +135,7 @@ namespace AzerothFriendMovement
 #endif
     }
 
-    bool Yield(PlayerbotAI* ai)
+    bool YieldEscort(PlayerbotAI* ai)
     {
 #if AF_HAS_PLAYERBOTS
         Player* bot = ai ? ai->GetBot() : nullptr;

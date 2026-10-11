@@ -21,7 +21,8 @@ An autonomous AI companion module, Python reasoning bridge, and WoW 3.3.5a clien
   - [JSON-RPC Gateway and CLI Control](#json-rpc-gateway-and-cli-control)
   - [Modular Bridge Plugins](#modular-bridge-plugins)
   - [Zero-Token Sensory Reuse](#zero-token-sensory-reuse)
-  - [Client HUD and Addon](#client-hud-and-addon)
+  - [Autonomous Autopilot and World Errands](#autonomous-autopilot-and-world-errands)
+  - [Unified 9-Tab Master HUD and Monitor Addon](#unified-9-tab-master-hud-and-monitor-addon)
 - [Repository Structure](#repository-structure)
 - [Prerequisites](#prerequisites)
 - [Installation Guide](#installation-guide)
@@ -253,19 +254,36 @@ When paired with <code>mod-llm-chatter</code>, AzerothFriend can reuse already-o
 
 This reduces duplicate model calls and lets one perception event drive both conversation and physical behavior where appropriate. Token-sharing and sensory-reuse counters are surfaced in bridge telemetry and the addon.
 
-### Client HUD and Addon
+### Autonomous Autopilot and World Errands
 
-<code>AzerothFriendUI</code> is the in-game control and debugging surface.
+AzerothFriend incorporates an autonomous autopilot engine for long-range navigation, procedural world errands, and social embodiment:
 
-The master window provides five tabs:
+- **Dijkstra Travel Router & Transport Crossings**: Computes cross-continent itineraries combining flight masters, deep-water ferries, zeppelins, tram lines, and portal teleporters with terrain costs.
+- **Procedural World Errands**: Bots autonomously evaluate quest turn-ins, equipment upgrades, repair runs, class trainers, and ambient gathering routes based on their level and current zone.
+- **Social Embodiment & Passer-by Buffs**: Bots evaluate nearby friendly adventurers and players, opportunistically casting class buffs (Power Word: Fortitude, Mark of the Wild, Arcane Intellect) and waving politely.
+- **Realistic Ghost Navigation**: Automatic corpse runs navigate back to the death coordinate with obstacle avoidance before falling back to spirit resurrection.
 
-1. **Context** — self-context, inventory, quests, master distance, and surroundings.
-2. **Mindset / Debug** — cognition state, claim status, transport health, thinking policy, and token telemetry.
-3. **Actions** — live plan/action state and direct control.
-4. **Thoughts** — reasoning, tactical/action timeline entries, speech, and memory output.
-5. **Bot API v1** — capability catalog, contracts, authority, bindings, and verified results.
+### Unified 9-Tab Master HUD and Monitor Addon
 
-Recent UI work also adds grounded action suggestions and stronger thinking-lock/debounce behavior so background telemetry does not prematurely clear an active thinking state.
+<code>AzerothFriendUI</code> provides a master in-game control, monitoring, and debugging interface for both individual companions and server-wide bot rosters.
+
+The master window features a unified 9-tab workspace:
+
+1. **Overview** — Live monitor status, current task, vitals, location, and companion snapshot.
+2. **Context** — Self-context, bags, gear, consumables, quests, master distance, zone/subzone, and surroundings.
+3. **Mindset / Debug** — Cognition state, commitment window, claim status, transport health, thinking policy, and token telemetry.
+4. **Actions** — Live plan/action state, execution results, action-mode controls, and direct commands.
+5. **Bot API v1** — Capability catalog, parameter schemas, authority, bindings, and verified outcomes.
+6. **Thoughts** — Reasoning stream, tactical/action timeline entries, speech, and memory output.
+7. **Travel** — Travel plan, route legs, transport crossings, and destination waypoints.
+8. **Planner** — Compound action planner steps, execution queue, and pending actions.
+9. **Events** — Real-time event log, diary progress, combat encounters, and achievement triggers.
+
+Additionally, the interface includes:
+- **272px Multi-Bot Sidebar Roster**: Live bot status cards with search filtering, state chips (`Fighting`, `Moving`, `Waiting`, `Idle`), level tags, and dynamic counts.
+- **Selected Bot Header Card**: Class icon, colored name, level, zone, current errand/task, and autonomy tier badge.
+- **Dual Action Bars**: Row 1 tactical companion controls (`Follow`, `Stay`, `Attack`, `Rest`, `Reset`, `Clear`, `Autonomy`) and Row 2 monitor operations (`Follow camera`, `Teleport to`, `Replan now`, `Status to chat`, `Turn on/off`).
+- **Footer Bar**: Farsight camera follow status, whisper command input, auto-refresh toggle, and plain-text output toggle.
 
 ---
 
@@ -276,6 +294,7 @@ mod-azeroth-friend/
 ├── Addon/
 │   └── AzerothFriendUI/
 │       ├── AzerothFriendGoals.lua
+│       ├── AzerothFriendMonitor.lua
 │       ├── AzerothFriendProtocol.lua
 │       ├── AzerothFriendUI.lua
 │       ├── AzerothFriendUI.toc
@@ -290,25 +309,40 @@ mod-azeroth-friend/
 │       └── characters/
 │           ├── base/
 │           └── updates/
+│               └── 2026_10_11_azeroth_friend_autopilot.sql
 ├── src/
 │   ├── AzerothFriendActionDispatcher.*
 │   ├── AzerothFriendActionRegistry.*
 │   ├── AzerothFriendAiControl.*
+│   ├── AzerothFriendAutopilot.*
+│   ├── AzerothFriendAutopilotSchema.*
 │   ├── AzerothFriendBotController.*
+│   ├── AzerothFriendBuffs.*
 │   ├── AzerothFriendChatHook.*
 │   ├── AzerothFriendCommand.*
 │   ├── AzerothFriendConfig.*
 │   ├── AzerothFriendEnvironment.*
+│   ├── AzerothFriendErrands.*
+│   ├── AzerothFriendExpression.*
 │   ├── AzerothFriendLiveState.*
+│   ├── AzerothFriendMonitor.*
+│   ├── AzerothFriendMovement.*
 │   ├── AzerothFriendPlayerbot.h
 │   ├── AzerothFriendPlayerbotActions.*
+│   ├── AzerothFriendProgress.*
+│   ├── AzerothFriendRoute.*
 │   ├── AzerothFriendScriptLoader.cpp
 │   ├── AzerothFriendShared.*
-│   └── AzerothFriendSnapshotMemory.*
+│   ├── AzerothFriendSnapshotMemory.*
+│   ├── AzerothFriendStrategy.*
+│   ├── AzerothFriendTravel.*
+│   ├── AzerothFriendUtilities.h
+│   └── AzerothFriendWorldIndex.*
 ├── tools/
 │   ├── af_ctl.py
 │   ├── azeroth_friend_bridge.py
 │   ├── friend_action_catalog.py
+│   ├── friend_autopilot.py
 │   ├── friend_catalogs.py
 │   ├── friend_chatter_consumer.py
 │   ├── friend_co_processor.py
@@ -610,6 +644,22 @@ Common server commands include:
 
 Use <code>.af</code> with no valid subcommand to print the current server-side help for your build.
 
+### Autopilot and World Monitor Commands
+
+Autopilot coordinates autonomous bot behaviors, cross-continent travel itineraries, and world errands:
+
+| Command | Purpose |
+|---|---|
+| <code>.af autopilot status [bot]</code> | Display current errand, route progress, and autonomy tier. |
+| <code>.af autopilot on [bot]</code> | Enroll a companion or playerbot into autonomous world autopilot. |
+| <code>.af autopilot off [bot]</code> | Withdraw a bot from autonomous autopilot. |
+| <code>.af autopilot list</code> | List all currently enrolled autopilot bots. |
+| <code>.af autopilot diary [bot]</code> | View recent diary entries and milestone events. |
+| <code>.af autopilot plan [bot]</code> | Print current errand details and Dijkstra route legs. |
+| <code>.af monitor list</code> | Query server-side roster of active bots for monitor inspection. |
+| <code>.af monitor follow &lt;bot&gt;</code> | Activate client camera follow on the target bot. |
+| <code>.af monitor unfollow</code> | Clear active camera follow. |
+
 ### Goal Management and Suggestions
 
 Goal and suggestion commands include:
@@ -701,38 +751,53 @@ Open the master HUD with:
 /af
 ~~~
 
-You can also use <code>/azerothfriend</code> or <code>/friend</code>.
+You can also use <code>/azerothfriend</code>, <code>/friend</code>, or dedicated monitor shortcuts: <code>/afm</code>, <code>/afmonitor</code>, <code>/oapm</code>, or <code>/om</code>.
 
-### Tab Breakdown
+### Unified 9-Tab Workspace
 
 | Tab | What it shows |
 |---|---|
+| **Overview** | Live monitor status, current task/errand, vitals, coordinates, and companion snapshot. |
 | **Context** | Self-context, bags, gear, consumables, quests, master distance, zone/subzone, and surroundings. |
 | **Mindset / Debug** | Active mindset, commitment window, claim/autonomy state, thinking policy, transport status, and token counters. |
 | **Actions** | Current action/plan state, execution results, action-mode controls, and direct commands. |
-| **Thoughts** | Thought stream, tactical/action badges, speech, memories, and goal reasoning. |
 | **Bot API v1** | Live capability catalog, contract details, authority, bindings, and verified outcomes. |
+| **Thoughts** | Thought stream, tactical/action badges, speech, memories, and goal reasoning. |
+| **Travel** | Route itineraries, travel legs, transport crossings, and destination waypoints. |
+| **Planner** | Multi-action plan step pipeline, step revisions, and execution queue. |
+| **Events** | Real-time event dispatches, diary entries, combat triggers, and sensory reuse logs. |
 
-The minimap button toggles the HUD and can switch between unified and floating layouts.
+### Multi-Bot Sidebar Roster & Controls
+
+- **272px Sidebar Roster**: Displays all enrolled bots and nearby companions. Includes real-time search box, state filter chips (`Fighting`, `Moving`, `Waiting`, `Idle`), level tags, and dynamic counter.
+- **Selected Bot Card**: 32×32 class icon, class-colored name, level, zone, current task, state pill, and autonomy tier badge.
+- **Dual Control Bars**:
+  - *Row 1 (Tactical Companion)*: Follow, Stay, Attack, Rest, Reset, Clear, Autonomy.
+  - *Row 2 (Monitor Operations)*: Follow camera, Teleport to, Replan now, Status to chat, Turn on/off.
+- **Footer Bar**: Farsight camera follow status, whisper command input box, auto-refresh toggle, and plain-text switch.
 
 ### Addon Slash Commands
 
 Common addon commands:
 
 ~~~text
-/af
-/af context
-/af debug
-/af actions
-/af thoughts
-/af api
-/af catalog
-/af sync
-/af minimap
-/af layout
-/af reset
-/af claim
-/af release
+/af                 -- Toggle master HUD
+/afm, /afmonitor    -- Toggle master HUD (Monitor shortcut)
+/oapm, /om          -- Backward-compatibility monitor alias
+/af overview        -- Switch to Tab 1 (Overview)
+/af context         -- Switch to Tab 2 (Context)
+/af debug           -- Switch to Tab 3 (Mindset / Debug)
+/af actions         -- Switch to Tab 4 (Actions)
+/af api             -- Switch to Tab 5 (Bot API v1)
+/af thoughts        -- Switch to Tab 6 (Thoughts)
+/af travel          -- Switch to Tab 7 (Travel)
+/af planner         -- Switch to Tab 8 (Planner)
+/af events          -- Switch to Tab 9 (Events)
+/af sync            -- Request full telemetry refresh
+/af minimap         -- Toggle minimap button
+/af reset           -- Reset window position
+/af claim           -- Claim target companion
+/af release         -- Release companion claim
 ~~~
 
 Long telemetry payloads are chunked and reassembled by the addon protocol so large context and API responses are not limited to a single chat line.
@@ -768,6 +833,15 @@ The full authoritative list is <code>conf/mod_azeroth_friend.conf.dist</code>. T
 | <code>AzerothFriend.LLM.Thinking.Effort</code> | <code>low</code> | Requested reasoning effort. |
 | <code>AzerothFriend.Context.MaxInputTokens</code> | <code>3500</code> | Planner context ceiling used by the bridge. |
 | <code>AzerothFriend.Grind.SearchRadiusYards</code> | <code>60.0</code> | Default ambient grind/roam radius. |
+| <code>AzerothFriend.Autopilot.Enable</code> | <code>1</code> | Enables autonomous world autopilot subsystem. |
+| <code>AzerothFriend.Autopilot.AllowMasterEnroll</code> | <code>1</code> | Allows bot owners to enroll companions via <code>.af autopilot on</code>. |
+| <code>AzerothFriend.Autopilot.RandomBotPercent</code> | <code>100</code> | Percentage of random bots enrolled into autopilot by default. |
+| <code>AzerothFriend.Autopilot.SweepIntervalMs</code> | <code>1000</code> | Autopilot evaluation loop interval in milliseconds. |
+| <code>AzerothFriend.Buff.Enable</code> | <code>1</code> | Enables passer-by buffing from learned spellbook. |
+| <code>AzerothFriend.Buff.Range</code> | <code>25.0</code> | Friendly search radius for passer-by buffing. |
+| <code>AzerothFriend.Buff.WaveChance</code> | <code>25</code> | Percentage chance to wave/emote after buffing. |
+| <code>AzerothFriend.Monitor.Enable</code> | <code>1</code> | Enables whisper-protocol companion monitor HUD communication. |
+| <code>AzerothFriend.Monitor.MinSecurity</code> | <code>0</code> | Minimum security level required for server-wide monitor queries. |
 
 Settings are split between C++ worldserver behavior and Python-bridge behavior. Restart the relevant process after changing a setting that is only read at startup.
 

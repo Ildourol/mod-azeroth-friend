@@ -1,6 +1,7 @@
 #ifndef MOD_AZEROTH_FRIEND_TRAVEL_H
 #define MOD_AZEROTH_FRIEND_TRAVEL_H
 
+#include "AzerothFriendPlayerbot.h"
 #include "AzerothFriendRoute.h"
 
 #include <cstdint>
@@ -8,11 +9,6 @@
 #include <vector>
 
 class Player;
-#if AF_HAS_PLAYERBOTS
-class PlayerbotAI;
-#else
-class PlayerbotAI {};
-#endif
 
 struct AutopilotTravelPoint
 {
