@@ -7,6 +7,7 @@
 #include "AzerothFriendShared.h"
 #include "AzerothFriendLiveState.h"
 #include "AzerothFriendAutopilot.h"
+#include "AzerothFriendErrands.h"
 #include "AzerothFriendBuffs.h"
 #include "AzerothFriendMonitor.h"
 #include "AzerothFriendRoute.h"
@@ -552,6 +553,15 @@ void AzerothFriendWorldScript::OnAfterConfigLoad(bool /*reload*/)
     Buffs_LoadConfig();
     Monitor_LoadConfig();
     AzerothFriendRoute::LoadConfig();
+    AzerothFriendTravel::LoadConfig();
+    AzerothFriendErrands::LoadConfig();
+}
+
+void AzerothFriendWorldScript::OnStartup()
+{
+    // Config loading precedes ObjectMgr/transport data loading. Building these
+    // indices in OnAfterConfigLoad permanently produced empty service/travel
+    // catalogs, and rebuilding during config reload also raced map updates.
     Autopilot_Load();
     AzerothFriendWorldIndex::Build();
     AzerothFriendTravel::Build();

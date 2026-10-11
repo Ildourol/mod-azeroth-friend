@@ -11,6 +11,17 @@
 #include "Log.h"
 #include <sstream>
 #include <set>
+#include <atomic>
+
+namespace
+{
+    uint64 NextTelemetrySequence()
+    {
+        // Error frames and ordinary telemetry share the decoder's id space.
+        static std::atomic<uint64> sequence{0};
+        return ++sequence;
+    }
+}
 
 namespace AzerothFriendShared
 {
@@ -209,9 +220,11 @@ namespace AzerothFriendShared
         if (!bot || !bot->IsInWorld() || !sAzerothFriendConfig->enable)
             return;
 
-        std::string msg = "[" + tag + "] " + payload;
-        static uint64 sequence = 0;
-        std::string serial = std::to_string(++sequence);
+        // AF1 still provides framing; this inner envelope identifies raw
+        // history/environment payloads in the unified multi-bot HUD.
+        std::string msg = "[AFBOT " + std::to_string(bot->GetGUID().GetCounter()) + " " +
+                          bot->GetName() + "] [" + tag + "] " + payload;
+        std::string serial = std::to_string(NextTelemetrySequence());
         std::string encoded;
         static char const hex[] = "0123456789abcdef";
         for (unsigned char c : msg)
@@ -222,7 +235,9 @@ namespace AzerothFriendShared
         std::set<uint32> delivered;
         auto deliver = [&](Player* recipient)
         {
-            if (!recipient || !recipient->GetSession() || !CanControl(recipient, bot))
+            if (!recipient || !recipient->GetSession())
+                return;
+            if (!CanControl(recipient, bot) && recipient->GetSession()->GetSecurity() < SEC_GAMEMASTER)
                 return;
             if (!delivered.insert(recipient->GetGUID().GetCounter()).second)
                 return;
@@ -265,7 +280,7 @@ namespace AzerothFriendShared
         // 2. Bot master if connected and not in group
         // Stored owner (master) guid: RAM cache first; SQL only in rollback mode.
         uint32 masterGuid = 0;
-        if (sAFLiveState->IsRunning())
+        if (!sAzerothFriendConfig->sqlCompatibilityMode)
         {
             AzerothFriend::BotControlRecord control;
             if (sAFLiveState->GetBotControl(bot->GetGUID().GetCounter(), control))
@@ -318,8 +333,7 @@ namespace AzerothFriendShared
         if (!botName.empty())
             msg += "|bot:" + botName;
 
-        static uint64 errSequence = 0;
-        std::string serial = std::to_string(++errSequence);
+        std::string serial = std::to_string(NextTelemetrySequence());
         std::string encoded;
         static char const hex[] = "0123456789abcdef";
         for (unsigned char c : msg)

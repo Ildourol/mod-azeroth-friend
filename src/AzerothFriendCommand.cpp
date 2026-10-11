@@ -125,7 +125,7 @@ namespace AzerothFriend
 
             // mod-llm-chatter Token Synergy Telemetry (RAM counters; the bridge
             // flushes them to SQL every 10 seconds when dirty).
-            if (sAFLiveState->IsRunning())
+            if (!sAzerothFriendConfig->sqlCompatibilityMode)
             {
                 AzerothFriend::TelemetryCounters counters = sAFLiveState->GetTelemetry();
                 std::ostringstream telInfo;
@@ -1595,8 +1595,8 @@ namespace AzerothFriend
                     handler->SendSysMessage("Bot not found.");
                     return;
                 }
-                AzerothFriendProgress::QueueEvent(bot->GetGUID().GetRawValue(), "replan", "Operator requested immediate replan");
-                handler->PSendSysMessage("Queued replan request for %s.", bot->GetName().c_str());
+                if (Autopilot_MonitorCommand(handler->GetPlayer(), "replan", bot->GetName()))
+                    handler->PSendSysMessage("Queued replan request for %s.", bot->GetName().c_str());
                 return;
             }
 

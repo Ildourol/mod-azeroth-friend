@@ -29,6 +29,7 @@ public:
     AzerothFriendWorldScript();
 
     void OnAfterConfigLoad(bool reload) override;
+    void OnStartup() override;
     void OnUpdate(uint32 diff) override;
     void OnShutdown() override;
 };

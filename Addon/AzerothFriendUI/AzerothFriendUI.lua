@@ -6,11 +6,19 @@
 
 local ADDON_NAME = "AzerothFriendUI"
 local ADDON_PREFIX = "AZEROTH_FRIEND"
+local BotCache
 local NativeSendChatMessage = SendChatMessage
 local function SendChatMessage(message, channel, language, target)
     -- One authoritative route per click. Legacy paired whispers are redundant.
     if channel == "WHISPER" then return end
     if not message or not message:match("^%.af ") then return end
+    local command, rest = message:match("^%.af (%S+)%s*(.*)$")
+    if BotCache and BotCache.name ~= "" and (command == "action" or command == "autonomy" or command == "goal") then
+        local first = rest:match("^(%S+)")
+        if first ~= BotCache.name then
+            message = ".af " .. command .. " " .. BotCache.name .. " " .. rest
+        end
+    end
     NativeSendChatMessage(message, "SAY")
 end
 
@@ -21,8 +29,6 @@ local AFThinking = { actions = 0, both = 0, short = 0, long = 0 }
 -- `BotCache.name` as a global lookup (nil in game) and the function raises before
 -- the `.af suggest` command is ever sent to the server, which is exactly why every
 -- Suggest button appeared to do nothing.
-local BotCache
-
 function AFRequestSuggestions(scope)
     scope = (scope and scope ~= "") and scope:lower() or "both"
     if scope == "action" then scope = "actions" end
@@ -77,7 +83,7 @@ local DEFAULT_SETTINGS = {
     activeTab = 1, -- 1: Overview, 2: Context, 3: Mindset/Debug, 4: Actions, 5: Bot API, 6: Thoughts, 7: Travel, 8: Planner, 9: Events
     layoutMode = "tabbed", -- "tabbed" or "floating"
     showMinimap = true,
-    minimapPos = 45, -- angle in degrees
+    minimapPos = 200, -- angle in degrees (default 200 matches original autopilot position)
     showState = false,
     showThought = false,
     showActions = false,
@@ -91,12 +97,12 @@ local DEFAULT_SETTINGS = {
 -- Live Companion Bot Cache. Assigned to the forward-declared local at the top of
 -- the file so AFRequestSuggestions and every other helper share one binding.
 BotCache = {
-    name = "Friendbot",
-    race = "Orc",
-    class = "Rogue",
-    level = 40,
-    health = "100%",
-    power = "100%",
+    name = "",
+    race = "Unknown",
+    class = "Unknown",
+    level = 0,
+    health = "Unknown",
+    power = "Unknown",
     zone = "Unknown",
     subzone = "Unknown",
     coords = "0, 0, 0",
@@ -213,6 +219,8 @@ BotCache = {
 }
 
 -- Forward declarations used by telemetry handlers and UI callbacks.
+local DefaultBotCache = CopyTable(BotCache)
+local CompanionCaches = {}
 local RefreshMasterTab
 local RequestRefresh
 local HandleInterceptedActionError
@@ -446,8 +454,8 @@ local M = {
     autoRefresh = true,
     watching    = nil,
     watchNote   = "",
-    allowed     = true,
-    active      = true,
+    allowed     = false,
+    active      = false,
     offReasons  = {},
     filter      = "",
     chip        = nil,
@@ -459,6 +467,7 @@ local M = {
     },
     pageLines   = {},
     pageText    = "",
+    pageData    = {},
 }
 
 StaticPopupDialogs["AZEROTHFRIEND_TURN_OFF"] = {
@@ -490,8 +499,28 @@ end
 
 local function BotByGuid(guid)
     if not guid then return nil end
+    local sGuid = tostring(guid)
     for _, b in ipairs(M.bots) do
-        if tostring(b.guid) == tostring(guid) then return b end
+        if tostring(b.guid) == sGuid then return b end
+    end
+    if BotCache and (tostring(BotCache.guid) == sGuid or sGuid == "companion" or (BotCache.name and sGuid == tostring(BotCache.name))) then
+        local cId = 1
+        for id, f in pairs(CLASS_FILES) do
+            if f == BotCache.class or f == BotCache.playerbotClass then
+                cId = id
+                break
+            end
+        end
+        return {
+            guid = BotCache.guid or "companion",
+            name = BotCache.name or "Companion",
+            level = tonumber(BotCache.level) or 80,
+            class = cId,
+            zone = BotCache.zone or "Nearby",
+            state = (BotCache.autonomyEnabled or (AFGetGoalState and AFGetGoalState() and AFGetGoalState().enabled)) and "active" or "idle",
+            doing = (BotCache.activeAction and BotCache.activeAction ~= "None") and BotCache.activeAction or (BotCache.thought and BotCache.thought ~= "" and BotCache.thought) or "Ready",
+            tier = "companion",
+        }
     end
     return nil
 end
@@ -648,6 +677,25 @@ local function VisibleBots()
             table.insert(list, b)
         end
     end
+    if #M.bots == 0 and filter == "" and not M.chip and BotCache and BotCache.name and BotCache.name ~= "" then
+        local cId = 1
+        for id, f in pairs(CLASS_FILES) do
+            if f == BotCache.class or f == BotCache.playerbotClass then
+                cId = id
+                break
+            end
+        end
+        table.insert(list, {
+            guid = BotCache.guid or "companion",
+            name = BotCache.name,
+            level = tonumber(BotCache.level) or 80,
+            class = cId,
+            zone = BotCache.zone or "Nearby",
+            state = (BotCache.autonomyEnabled or (AFGetGoalState and AFGetGoalState() and AFGetGoalState().enabled)) and "active" or "idle",
+            doing = (BotCache.activeAction and BotCache.activeAction ~= "None") and BotCache.activeAction or (BotCache.thought and BotCache.thought ~= "" and BotCache.thought) or "Ready",
+            tier = "companion",
+        })
+    end
     return list
 end
 
@@ -708,16 +756,11 @@ RefreshRosterList = function()
         end
     end
 
-    if #M.bots == 0 then
+    if #list == 0 then
         if listEmpty then
             listEmpty:SetText(M.allowed
                 and "No bots found on autopilot.\n\n|cff909090Target a bot and press Turn on, or let server autopilot enroll bots.|r"
                 or ("|cff909090" .. (M.denied or "Connecting to companion monitor...") .. "|r"))
-            listEmpty:Show()
-        end
-    elseif #list == 0 then
-        if listEmpty then
-            listEmpty:SetText("No bot matches.\n\n|cff909090Clear the search or active filter chip.|r")
             listEmpty:Show()
         end
     else
@@ -725,7 +768,7 @@ RefreshRosterList = function()
     end
 
     if countText then
-        countText:SetText((#list == #M.bots) and (#M.bots .. " bots") or (#list .. " of " .. #M.bots .. " bots"))
+        countText:SetText(#list .. " bot" .. (#list == 1 and "" or "s"))
     end
     UpdateChips()
 end
@@ -752,7 +795,7 @@ UpdateBotCard = function()
         cardDoing:SetText((b.doing ~= "") and b.doing or "|cff808080no current task|r")
         local hex = STATE_COLORS[b.state] or "c0c0c0"
         local r, g, bColor = HexColor(hex)
-        FlatBackdrop(statePill, { r * 0.22, g * 0.22, b * 0.22 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        FlatBackdrop(statePill, { r * 0.22, g * 0.22, bColor * 0.22 }, 1, { r * 0.7, g * 0.7, bColor * 0.7 })
         statePillText:SetText("|cff" .. hex .. string.upper(b.state) .. "|r")
         statePill:SetWidth(statePillText:GetStringWidth() + 18)
         statePill:Show()
@@ -762,7 +805,7 @@ UpdateBotCard = function()
         tierText:SetText("")
         cardIcon:SetTexture("Interface\\Icons\\INV_Misc_Spyglass_03")
         cardIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        cardName:SetText(BotCache.name and ("|cffa0a0a0" .. BotCache.name .. "|r") or "No bot selected")
+        cardName:SetText(BotCache.name ~= "" and ("|cffa0a0a0" .. BotCache.name .. "|r") or "No bot selected")
         cardSub:SetText("|cff909090Pick one on the left, or target a bot and press Turn on.|r")
         cardDoing:SetText("")
     end
@@ -787,49 +830,52 @@ end
 
 UpdateServerState = function()
     if not serverPill or not serverPillText then return end
-    if M.allowed and M.active then
+    if M.allowed then
         local r, g, bColor = HexColor("60e060")
-        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
-        serverPillText:SetText("|cff60e060AUTOPILOT ON|r")
-        serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
-    elseif M.allowed and M.active == false then
-        local r, g, bColor = HexColor("ff6060")
-        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
-        serverPillText:SetText("|cffff6060AUTOPILOT OFF|r")
+        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, bColor * 0.25 }, 1, { r * 0.7, g * 0.7, bColor * 0.7 })
+        serverPillText:SetText("|cff60e060MONITOR ONLINE|r")
         serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
     elseif M.denied then
         local r, g, bColor = HexColor("ff6060")
-        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, bColor * 0.25 }, 1, { r * 0.7, g * 0.7, bColor * 0.7 })
         serverPillText:SetText("|cffff6060NO ACCESS|r")
         serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
     else
         local r, g, bColor = HexColor("a0a0a0")
-        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, b * 0.25 }, 1, { r * 0.7, g * 0.7, b * 0.7 })
+        FlatBackdrop(serverPill, { r * 0.25, g * 0.25, bColor * 0.25 }, 1, { r * 0.7, g * 0.7, bColor * 0.7 })
         serverPillText:SetText("|cffa0a0a0CONNECTING|r")
         serverPill:SetWidth(serverPillText:GetStringWidth() + 18)
     end
 end
 
 SelectBot = function(guid)
+    local previous = M.selected
     M.selected = tostring(guid)
     M.gone = false
     local picked = BotByGuid(guid)
     if picked then
+        if previous ~= M.selected then
+            if BotCache.name ~= "" then CompanionCaches[BotCache.name] = BotCache end
+            BotCache = CompanionCaches[picked.name] or CopyTable(DefaultBotCache)
+            M.pageData, M.pageLines, M.pageText = {}, {}, ""
+            M.pending, M.waiting = nil, false
+            if AFSelectGoalBot then AFSelectGoalBot(picked.name) end
+        end
         M.selectedName = picked.name
+        BotCache.guid = tonumber(guid) and tostring(guid) or nil
         BotCache.name = picked.name
         BotCache.class = CLASS_FILES[picked.class] or "Warrior"
         BotCache.level = picked.level
+        BotCache.zone = picked.zone
     end
+    -- Companion telemetry feeds five tabs and the tactical controls regardless
+    -- of which monitor page is open when the selection changes.
+    if picked and picked.name then SendChatMessage(".af inspect " .. picked.name) end
     local s = GetSettings()
     local pageKey = M.pages[s.activeTab]
-    if pageKey and M.selected then
-        M.pageLines = {}
-        M.pageText = "|cff909090Loading server " .. pageKey .. " telemetry for " .. (picked and picked.name or "bot") .. "...|r"
+    if pageKey and tonumber(M.selected) then
+        M.waiting, M.askedAt = true, GetTime()
         SendAddonMessage("AFUI", "PAGE\t" .. M.selected .. "\t" .. pageKey, "WHISPER", UnitName("player"))
-    else
-        if picked and picked.name then
-            SendChatMessage(".af inspect " .. picked.name)
-        end
     end
     if UpdateBotCard then UpdateBotCard() end
     if UpdateFooterCamera then UpdateFooterCamera() end
@@ -866,7 +912,7 @@ OnMonitorMessage = function(msg)
         table.sort(M.incoming, function(a, b) return (a.name or "") < (b.name or "") end)
         M.bots = M.incoming
         M.incoming = nil
-        if not M.selected and #M.bots > 0 then
+        if (not M.selected or not tonumber(M.selected) or not BotByGuid(M.selected)) and #M.bots > 0 then
             local found = nil
             for _, b in ipairs(M.bots) do
                 if b.name == BotCache.name then found = b; break end
@@ -893,11 +939,14 @@ OnMonitorMessage = function(msg)
     elseif kind == "Z" and M.pending then
         local p = M.pending
         M.pending = nil
+        if f[2] ~= p.guid or f[3] ~= p.page then return end
         M.waiting = false
         M.pageAt = GetTime()
         if p.guid == M.selected then
             M.pageLines = p.lines
-            M.pageText = FormatServerPageText(p.lines)
+            M.pageData = M.pageData or {}
+            M.pageData[p.page] = FormatServerPageText(p.lines)
+            M.pageText = M.pageData[p.page]
             if updatedText then
                 updatedText:SetText("updated " .. date("%H:%M:%S"))
             end
@@ -945,19 +994,28 @@ end
 local function SetContainerText(container, text)
     if not container then return end
     text = text or ""
-    if container.__afLastText == text then return end
+    local parent = container:GetParent()
+    local minHeight = (parent and parent.GetHeight and parent:GetHeight()) or 330
+    local parentW = (parent and parent.GetWidth and parent:GetWidth()) or (container.GetWidth and container:GetWidth()) or 646
+    if container.__afLastText == text and container.__afWidth == parentW and container.__afMinHeight == minHeight then return end
     container.__afLastText = text
+    container.__afWidth, container.__afMinHeight = parentW, minHeight
 
     local name = container.GetName and container:GetName() or ""
     local fs = (name ~= "" and _G[name .. "Text"]) or (container.GetFontString and container:GetFontString()) or container.text
 
     if fs and fs.SetText then
+        if fs.SetWidth then
+            fs:SetWidth(math.max(parentW - 20, 200))
+        end
         fs:SetText(text)
         local contentHeight = (fs.GetStringHeight and fs:GetStringHeight()) or 0
-        local parent = container:GetParent()
-        local minHeight = (parent and parent.GetHeight and parent:GetHeight()) or 330
+        local totalH = math.max(contentHeight + 24, minHeight)
         if container.SetHeight then
-            container:SetHeight(math.max(contentHeight + 24, minHeight))
+            container:SetHeight(totalH)
+        end
+        if fs.SetHeight then
+            fs:SetHeight(totalH)
         end
         if parent and parent.UpdateScrollChildRect then
             parent:UpdateScrollChildRect()
@@ -1018,6 +1076,102 @@ end
 -- ----------------------------------------------------------------------------
 -- Content Formatters
 -- ----------------------------------------------------------------------------
+
+-- 0. Format Overview Dashboard (Master Tab 1)
+local function FormatOverviewText()
+    if BotCache.name == "" and not SelectedBot() then
+        return COLORS.HEADER .. "AzerothFriend Companion & Autopilot HUD" .. COLORS.RESET ..
+            "\n\n" .. COLORS.VALUE .. "Waiting for companion telemetry. Select an online bot in the roster or press Sync." .. COLORS.RESET ..
+            "\n\n" .. COLORS.MUTED .. (M.denied or (M.allowed and "Monitor connected; no companion selected." or "Connecting to the server monitor...")) .. COLORS.RESET
+    end
+    local out = {}
+    local name = (BotCache and BotCache.name and BotCache.name ~= "") and BotCache.name or "Companion"
+    local lvl = (BotCache and BotCache.level) or 80
+    local cls = (BotCache and BotCache.class) or "Warrior"
+    local race = (BotCache and BotCache.race) or ""
+
+    table.insert(out, COLORS.HEADER .. "Companion Tactical Overview & Dashboard" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "Real-time companion vitals, posture, goals, location, and thoughts" .. COLORS.RESET)
+    table.insert(out, COLORS.MUTED .. string.rep("-", 50) .. COLORS.RESET)
+
+    -- Bot Profile & Posture
+    table.insert(out, COLORS.LABEL .. "Companion: " .. COLORS.RESET .. COLORS.SUCCESS .. name .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Level " .. COLORS.WARNING .. lvl .. " " .. race .. " " .. cls .. COLORS.RESET ..
+                 COLORS.MUTED .. " | HP: " .. COLORS.RESET .. COLORS.VALUE .. ((BotCache and BotCache.health) or "100%") .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Power: " .. COLORS.RESET .. COLORS.VALUE .. ((BotCache and BotCache.power) or "100%") .. COLORS.RESET)
+
+    -- Tactical Posture & Autonomy Switches
+    local actMode = ((BotCache and BotCache.actionMode) or "travel"):upper()
+    local modeColor = COLORS.CYAN
+    if actMode == "COMBAT" then modeColor = COLORS.ALERT
+    elseif actMode == "IDLE" then modeColor = COLORS.SUCCESS
+    elseif actMode == "SOCIAL" then modeColor = "|cFFDA70D6"
+    end
+    local isClaimed = (tostring(BotCache and BotCache.claimed):upper() == "CLAIMED")
+    local claimText = isClaimed and (COLORS.ALERT .. "CLAIMED (Autonomous bridge paused)" .. COLORS.RESET) or (COLORS.SUCCESS .. "RELEASED (Bridge linked)" .. COLORS.RESET)
+    local isAuto = (BotCache and BotCache.autonomyEnabled) or (AFGetGoalState and AFGetGoalState() and AFGetGoalState().enabled)
+    local autoText = isAuto and (COLORS.CYAN .. "ON" .. COLORS.RESET) or (COLORS.MUTED .. "OFF" .. COLORS.RESET)
+
+    table.insert(out, COLORS.LABEL .. "Tactical Mode: " .. COLORS.RESET .. modeColor .. actMode .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Autonomy: " .. COLORS.RESET .. autoText ..
+                 COLORS.MUTED .. " | Claim: " .. COLORS.RESET .. claimText ..
+                 COLORS.MUTED .. " | Mindset: " .. COLORS.RESET .. COLORS.VALUE .. ((BotCache and BotCache.mindset) or "IDLE") .. COLORS.RESET)
+
+    -- Goals (Core Purpose & Objective)
+    local goal = AFGetGoalState and AFGetGoalState() or nil
+    local longGoal = (goal and goal.long_goal and goal.long_goal ~= "") and goal.long_goal or ((BotCache and BotCache.longTermGoal ~= "") and BotCache.longTermGoal or "Awaiting instructions")
+    local shortGoal = (goal and goal.goal and goal.goal ~= "") and goal.goal or ((BotCache and BotCache.currentGoal ~= "") and BotCache.currentGoal or "Accompanying master")
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Goals & Objective Hierarchy:" .. COLORS.RESET)
+    table.insert(out, COLORS.LABEL .. "Core Purpose (Long-Term): " .. COLORS.RESET .. COLORS.VALUE .. longGoal .. COLORS.RESET)
+    table.insert(out, COLORS.LABEL .. "Current Objective (Short-Term): " .. COLORS.RESET .. COLORS.VALUE .. shortGoal .. COLORS.RESET)
+
+    -- Active Action Execution
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Physical Execution Pipeline:" .. COLORS.RESET)
+    local actName = (BotCache and BotCache.activeAction) or "None"
+    local actSt = (BotCache and BotCache.actionStatus) or "IDLE"
+    local actSp = (BotCache and BotCache.actionStep) or "0 of 1"
+    table.insert(out, COLORS.LABEL .. "Active Action: " .. COLORS.RESET .. COLORS.SUCCESS .. actName:upper() .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Status: " .. COLORS.RESET .. COLORS.VALUE .. actSt .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Step: " .. COLORS.RESET .. COLORS.ORANGE .. actSp .. COLORS.RESET)
+    if BotCache and BotCache.movementTarget and BotCache.movementTarget ~= "None" and BotCache.movementTarget ~= "" then
+        table.insert(out, COLORS.LABEL .. "Movement Target: " .. COLORS.RESET .. COLORS.VALUE .. BotCache.movementTarget .. COLORS.RESET)
+    end
+    if BotCache and BotCache.lastActionError and BotCache.lastActionError ~= "" then
+        table.insert(out, COLORS.ALERT .. "[SUPPRESSED ERROR]: " .. COLORS.RESET .. COLORS.VALUE .. BotCache.lastActionError .. COLORS.RESET ..
+                     COLORS.MUTED .. " (chat spam blocked)" .. COLORS.RESET)
+    end
+
+    -- Cognitive Thoughts
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Cognitive Thought Stream:" .. COLORS.RESET)
+    local curThought = (BotCache and BotCache.thought and BotCache.thought ~= "" and BotCache.thought ~= "None") and BotCache.thought or "Awaiting companion guidance..."
+    table.insert(out, COLORS.CYAN .. '"' .. curThought .. '"' .. COLORS.RESET)
+
+    -- Master Link & Location
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Party Master & Surroundings:" .. COLORS.RESET)
+    if BotCache and BotCache.masterName and BotCache.masterName ~= "None" and BotCache.masterName ~= "" then
+        local distColor = (BotCache.masterDist or 0) < 10 and COLORS.SUCCESS or ((BotCache.masterDist or 0) < 30 and COLORS.WARNING or COLORS.ALERT)
+        table.insert(out, COLORS.LABEL .. "Master: " .. COLORS.RESET .. COLORS.PURPLE .. BotCache.masterName .. COLORS.RESET ..
+                     COLORS.LABEL .. " | Distance: " .. COLORS.RESET .. distColor .. (BotCache.masterDist or 0) .. "y" .. COLORS.RESET ..
+                     COLORS.LABEL .. " | Master Target: " .. COLORS.RESET .. COLORS.VALUE .. (BotCache.masterTarget or "None") .. COLORS.RESET)
+    else
+        table.insert(out, COLORS.MUTED .. "  No party master linked. Operating independently." .. COLORS.RESET)
+    end
+    local zoneText = (BotCache and BotCache.zone) or (SelectedBot() and SelectedBot().zone) or ""
+    if zoneText ~= "" then
+        table.insert(out, COLORS.LABEL .. "Location: " .. COLORS.RESET .. COLORS.VALUE .. zoneText .. COLORS.RESET)
+    end
+    local numSurr = (BotCache and BotCache.surroundings and #BotCache.surroundings) or 0
+    table.insert(out, COLORS.LABEL .. "Nearby Entities: " .. COLORS.RESET .. COLORS.VALUE .. numSurr .. " detected" .. COLORS.RESET ..
+                 (BotCache and BotCache.crowdCount and BotCache.crowdCount > numSurr and (COLORS.WARNING .. " (Crowd filter: " .. BotCache.crowdCount .. " total)" .. COLORS.RESET) or ""))
+
+    -- If server overview lines were received, append watchdog stats!
+    if M.pageData and M.pageData["overview"] then
+        table.insert(out, "\n" .. COLORS.SUBHEADER .. "Server Monitor Telemetry:" .. COLORS.RESET)
+        table.insert(out, M.pageData["overview"])
+    end
+
+    return table.concat(out, "\n")
+end
 
 -- 1. Format Context & Surroundings (Zero Extra Tokens)
 local function FormatContextText()
@@ -1765,6 +1919,105 @@ local function FormatAutopilotText()
     return table.concat(out, "\n")
 end
 
+-- 8. Format Planner & AI Decision Engine (Master Tab 8)
+local function FormatPlannerText()
+    local out = {}
+    table.insert(out, COLORS.HEADER .. "AI Cognitive Planner & Decision Engine" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "Compound multi-action planning, thinking protocol and token telemetry" .. COLORS.RESET)
+    table.insert(out, COLORS.MUTED .. string.rep("-", 50) .. COLORS.RESET)
+
+    table.insert(out, COLORS.LABEL .. "AI Model: " .. COLORS.RESET .. COLORS.SUCCESS .. tostring(BotCache and BotCache.model or "Default") .. COLORS.RESET)
+    local tok = (BotCache and BotCache.lastTokens) or { prompt = 0, completion = 0, reasoning = 0, total = 0 }
+    table.insert(out, COLORS.LABEL .. "Last Planning Tokens: " .. COLORS.RESET .. COLORS.VALUE .. (tok.total or 0) .. COLORS.RESET ..
+                 COLORS.MUTED .. " (Prompt: " .. (tok.prompt or 0) .. " | Output: " .. (tok.completion or 0) .. " | Reasoning: " .. (tok.reasoning or 0) .. ")" .. COLORS.RESET)
+    table.insert(out, COLORS.LABEL .. "Session Usage: " .. COLORS.RESET .. COLORS.VALUE .. (BotCache and BotCache.sessionTokens or 0) .. " tokens" .. COLORS.RESET ..
+                 COLORS.MUTED .. " across " .. (BotCache and BotCache.sessionCalls or 0) .. " planning cycles" .. COLORS.RESET)
+    local actLvl = (BotCache and BotCache.activityLevel) or "NORMAL"
+    table.insert(out, COLORS.LABEL .. "Activity Velocity: " .. COLORS.RESET ..
+                 (actLvl == "HIGH" and (COLORS.ALERT .. "HIGH ACTIVITY SPIKE" .. COLORS.RESET) or
+                 (actLvl == "ELEVATED" and (COLORS.WARNING .. "ELEVATED" .. COLORS.RESET) or
+                 (COLORS.SUCCESS .. "NORMAL" .. COLORS.RESET))) ..
+                 COLORS.MUTED .. " (" .. (BotCache and BotCache.activityReason or "Normal activity rate") .. ")" .. COLORS.RESET)
+
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Active Plan Context:" .. COLORS.RESET)
+    table.insert(out, COLORS.LABEL .. "Plan ID: " .. COLORS.RESET .. COLORS.VALUE .. tostring(BotCache and BotCache.planId or "None") .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Trigger Event: " .. COLORS.RESET .. COLORS.VALUE .. tostring(BotCache and BotCache.triggerEvent or "None") .. COLORS.RESET)
+    table.insert(out, COLORS.LABEL .. "Authority: " .. COLORS.RESET .. COLORS.VALUE .. tostring(BotCache and BotCache.actionAuthority or "unknown") .. COLORS.RESET ..
+                 COLORS.MUTED .. " | Binding: " .. COLORS.RESET .. COLORS.VALUE .. tostring(BotCache and BotCache.actionBinding or "unknown") .. COLORS.RESET)
+
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Cognitive Thought & Reasoning:" .. COLORS.RESET)
+    local th = (BotCache and BotCache.thought and BotCache.thought ~= "" and BotCache.thought ~= "None") and BotCache.thought or "(none recorded)"
+    table.insert(out, COLORS.CYAN .. '"' .. th .. '"' .. COLORS.RESET)
+    if BotCache and BotCache.deepReasoning and BotCache.deepReasoning ~= "" then
+        table.insert(out, "\n" .. COLORS.SUBHEADER .. "Deep Reasoning Trace:" .. COLORS.RESET)
+        table.insert(out, COLORS.MUTED .. BotCache.deepReasoning .. COLORS.RESET)
+    end
+
+    if M.pageData and M.pageData["planner"] then
+        table.insert(out, "\n" .. COLORS.SUBHEADER .. "Server Exchange Telemetry:" .. COLORS.RESET)
+        table.insert(out, M.pageData["planner"])
+    end
+
+    return table.concat(out, "\n")
+end
+
+-- 9. Format Events, Interceptions & Activity Diary (Master Tab 9)
+local function FormatEventsText()
+    local out = {}
+    table.insert(out, COLORS.HEADER .. "Event Stream, Interceptions & Activity Diary" .. COLORS.RESET)
+    table.insert(out, COLORS.CYAN .. "Audit log of player commands, sensory perceptions, and chat error suppressions" .. COLORS.RESET)
+    table.insert(out, COLORS.MUTED .. string.rep("-", 50) .. COLORS.RESET)
+
+    -- Intercepted Errors
+    table.insert(out, COLORS.SUBHEADER .. "Suppressed Action Errors (Protected from Chat Spam):" .. COLORS.RESET)
+    if BotCache and BotCache.errorHistory and #BotCache.errorHistory > 0 then
+        for _, err in ipairs(BotCache.errorHistory) do
+            table.insert(out, COLORS.ALERT .. "  [BLOCKED] " .. COLORS.RESET .. COLORS.VALUE ..
+                tostring(type(err) == "table" and err.error or err) .. COLORS.RESET)
+        end
+    elseif BotCache and BotCache.lastActionError and BotCache.lastActionError ~= "" then
+        table.insert(out, COLORS.ALERT .. "  [BLOCKED] " .. COLORS.RESET .. COLORS.VALUE .. BotCache.lastActionError .. COLORS.RESET ..
+                     COLORS.MUTED .. " (" .. (BotCache.lastActionErrorTime or "recent") .. " | " .. (BotCache.errorCount or 1) .. "x)" .. COLORS.RESET)
+    else
+        table.insert(out, COLORS.MUTED .. "  No errors suppressed. All actions clean." .. COLORS.RESET)
+    end
+
+    -- Recent Dialogue / Heard Log
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Recent Dialogue & Sensory Perception Log:" .. COLORS.RESET)
+    if BotCache and BotCache.heardLog and #BotCache.heardLog > 0 then
+        for i = math.max(1, #BotCache.heardLog - 10), #BotCache.heardLog do
+            local item = BotCache.heardLog[i]
+            if type(item) == "table" then
+                table.insert(out, COLORS.MUTED .. "  [" .. (item.time or "now") .. "] " .. COLORS.RESET ..
+                             COLORS.PURPLE .. (item.speaker or "Unknown") .. ": " .. COLORS.RESET ..
+                             COLORS.VALUE .. (item.text or "") .. COLORS.RESET)
+            else
+                table.insert(out, COLORS.VALUE .. "  " .. tostring(item) .. COLORS.RESET)
+            end
+        end
+    else
+        table.insert(out, COLORS.MUTED .. "  No dialogue heard yet." .. COLORS.RESET)
+    end
+
+    -- Recent Thoughts
+    table.insert(out, "\n" .. COLORS.SUBHEADER .. "Recent Thought Stream (Newest First):" .. COLORS.RESET)
+    if BotCache and BotCache.thoughtHistory and #BotCache.thoughtHistory > 0 then
+        for i = #BotCache.thoughtHistory, math.max(1, #BotCache.thoughtHistory - 5), -1 do
+            local t = BotCache.thoughtHistory[i]
+            table.insert(out, COLORS.CYAN .. "  * " .. tostring(type(t) == "table" and t.thought or t) .. COLORS.RESET)
+        end
+    else
+        table.insert(out, COLORS.MUTED .. "  (no thought history recorded)" .. COLORS.RESET)
+    end
+
+    if M.pageData and M.pageData["events"] then
+        table.insert(out, "\n" .. COLORS.SUBHEADER .. "Server Progress Diary:" .. COLORS.RESET)
+        table.insert(out, M.pageData["events"])
+    end
+
+    return table.concat(out, "\n")
+end
+
 -- Refresh Master Frame and floating frames
 RefreshMasterTab = function()
     -- Update floating panels if shown
@@ -1785,6 +2038,7 @@ RefreshMasterTab = function()
     end
 
     if not AzerothFriendMasterFrame or not AzerothFriendMasterFrame:IsShown() then return end
+    if cardIcon then UpdateBotCard() end
 
     local s = GetSettings()
     local tab = s.activeTab or 1
@@ -1879,6 +2133,7 @@ RefreshMasterTab = function()
 
     -- Render active tab content
     if tab == 4 then
+        if AzerothFriendMasterContentBg then AzerothFriendMasterContentBg:Hide() end
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:Hide() end
         if AzerothFriendApiPanel then AzerothFriendApiPanel:Hide() end
         if AzerothFriendActionsPanel then
@@ -2007,16 +2262,18 @@ RefreshMasterTab = function()
             end
         end
     elseif tab == 5 then
+        if AzerothFriendMasterContentBg then AzerothFriendMasterContentBg:Hide() end
         if AzerothFriendActionsPanel then AzerothFriendActionsPanel:Hide() end
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:Hide() end
         if AzerothFriendApiPanel then AzerothFriendApiPanel:Show() end
         RefreshBotApiPanel()
     else
+        if AzerothFriendMasterContentBg then AzerothFriendMasterContentBg:Show() end
         if AzerothFriendActionsPanel then AzerothFriendActionsPanel:Hide() end
         if AzerothFriendApiPanel then AzerothFriendApiPanel:Hide() end
         if AzerothFriendMasterScrollFrame then AzerothFriendMasterScrollFrame:Show() end
         if tab == 1 then
-            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or FormatContextText())
+            SetContainerText(AzerothFriendMasterHTML, FormatOverviewText())
         elseif tab == 2 then
             SetContainerText(AzerothFriendMasterHTML, FormatContextText())
         elseif tab == 3 then
@@ -2024,11 +2281,11 @@ RefreshMasterTab = function()
         elseif tab == 6 then
             SetContainerText(AzerothFriendMasterHTML, FormatThoughtsText())
         elseif tab == 7 then
-            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or FormatAutopilotText())
+            SetContainerText(AzerothFriendMasterHTML, (M.pageData and M.pageData["travel"]) or FormatAutopilotText())
         elseif tab == 8 then
-            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or "|cff909090Awaiting server planner telemetry...|r")
+            SetContainerText(AzerothFriendMasterHTML, FormatPlannerText())
         elseif tab == 9 then
-            SetContainerText(AzerothFriendMasterHTML, (M.pageText ~= "" and M.pageText) or "|cff909090Awaiting server events telemetry...|r")
+            SetContainerText(AzerothFriendMasterHTML, FormatEventsText())
         end
     end
 end
@@ -2058,6 +2315,17 @@ local function ProcessMessage(msg)
         if decoded then ProcessMessage(decoded) end
         return true
     end
+    -- Server envelopes identify even raw surroundings/history packets. Legacy
+    -- named packets remain supported while the server awaits its next rebuild.
+    local guid, name, body = msg:match("^%[AFBOT (%d+) ([^%]]+)%] (.*)$")
+    local packetName = name or msg:match("^%[FRIEND_%u+%]%s*Bot:%s*([^|]+)") or
+        msg:match("^%[FRIEND_STATE%]%s*Name:%s*([^|]+)") or msg:match('"bot"%s*:%s*"([^"]+)"')
+    packetName = packetName or msg:match("|[Bb]ot:%s*([^|]+)")
+    if M.selectedName and packetName and packetName ~= M.selectedName then return true end
+    if body then
+        msg = body
+        BotCache.guid, BotCache.name = guid, name
+    end
     -- FRIEND_GOAL frames belong to the dedicated handler below: it clears the Suggest
     -- thinking locks, mirrors the payload into BotCache, and calls AFProcessExtension
     -- itself for the goal panel. Letting the extension consume the frame here made that
@@ -2076,8 +2344,9 @@ local function ProcessMessage(msg)
             if k and v then
                 local kl = k:lower()
                 if kl == "name" then BotCache.name = v
+                elseif kl == "guid" then BotCache.guid = v
                 elseif kl == "race" then BotCache.race = v
-                elseif kl == "class" then BotCache.class = v
+                elseif kl == "class" then BotCache.class = CLASS_FILES[tonumber(v)] or v
                 elseif kl == "level" then BotCache.level = tonumber(v) or BotCache.level
                 elseif kl == "health" then BotCache.health = v
                 elseif kl == "power" then BotCache.power = v
@@ -2098,6 +2367,7 @@ local function ProcessMessage(msg)
             end
         end
         RefreshMasterTab()
+        if RefreshRosterList then RefreshRosterList() end
         return true
 
     -- 2. [FRIEND_CONTEXT] (Zero Token Self-Context)
@@ -2862,46 +3132,47 @@ local function ApplyLayoutMode()
     RefreshMasterTab()
 end
 
--- Minimap Button Creation & Dragging
+-- Minimap Button Creation & Dragging (styled after original autopilot addon)
 local function SetupMinimapButton()
     local btn = CreateFrame("Button", "AzerothFriendMinimapButton", Minimap)
-    btn:SetSize(32, 32)
+    btn:SetSize(31, 31)
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
+    btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForDrag("LeftButton")
     btn:EnableMouse(true)
     btn:SetMovable(true)
 
-    -- Icon
+    -- Spyglass Icon with trimmed borders matching original autopilot
     local icon = btn:CreateTexture(nil, "BACKGROUND")
     icon:SetSize(20, 20)
-    icon:SetPoint("CENTER", 0, 0)
-    icon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+    icon:SetPoint("TOPLEFT", 7, -5)
+    icon:SetTexture("Interface\\Icons\\INV_Misc_Spyglass_03")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     btn.icon = icon
 
-    -- Border
+    -- Circular Tracking Border
     local border = btn:CreateTexture(nil, "OVERLAY")
-    border:SetSize(52, 52)
+    border:SetSize(53, 53)
     border:SetPoint("TOPLEFT", 0, 0)
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
     local function UpdateMinimapPos()
         local s = GetSettings()
-        local angle = math.rad(s.minimapPos or 45)
-        local x = math.cos(angle) * 80
-        local y = math.sin(angle) * 80
+        local angle = math.rad(s.minimapPos or 200)
         btn:ClearAllPoints()
-        btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
+        btn:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * 80, math.sin(angle) * 80)
     end
+    btn.UpdateMinimapPos = UpdateMinimapPos
 
-    btn:RegisterForDrag("LeftButton")
     btn:SetScript("OnDragStart", function(self)
         self.isDragging = true
         self:SetScript("OnUpdate", function(self)
             local mx, my = Minimap:GetCenter()
             local cx, cy = GetCursorPosition()
-            local scale = UIParent:GetEffectiveScale()
-            cx, cy = cx / scale, cy / scale
-            local angle = math.deg(math.atan2(cy - my, cx - mx))
+            local scale = Minimap:GetEffectiveScale()
+            local angle = math.deg(math.atan2(cy / scale - my, cx / scale - mx))
             if angle < 0 then angle = angle + 360 end
             GetSettings().minimapPos = angle
             UpdateMinimapPos()
@@ -2932,19 +3203,25 @@ local function SetupMinimapButton()
 
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("AzerothFriend Companion HUD", 1, 0.82, 0)
-        GameTooltip:AddLine("Active Bot: " .. COLORS.SUCCESS .. BotCache.name .. COLORS.RESET, 1, 1, 1)
-        GameTooltip:AddLine("Mindset: " .. COLORS.CYAN .. BotCache.mindset .. COLORS.RESET, 1, 1, 1)
-        GameTooltip:AddLine("Tokens Saved: " .. COLORS.SUCCESS .. "~" .. BotCache.tokensSaved .. COLORS.RESET, 1, 1, 1)
+        GameTooltip:AddLine("AzerothFriend Companion & Autopilot Monitor", 1, 0.82, 0)
+        GameTooltip:AddLine("Active Companion: " .. COLORS.SUCCESS .. (BotCache.name or "Companion") .. COLORS.RESET, 1, 1, 1)
+        GameTooltip:AddLine("State: " .. COLORS.CYAN .. (BotCache.mindset or "IDLE") .. COLORS.RESET .. " | Mode: " .. COLORS.GOLD .. (BotCache.actionMode or "travel"):upper() .. COLORS.RESET, 1, 1, 1)
+        if M.watching then
+            local b = SelectedBot()
+            GameTooltip:AddLine("Camera on " .. ((b and b.name) or M.watchName or "?"), 0.4, 1, 0.4)
+        end
         GameTooltip:AddLine(" ", 1, 1, 1)
-        GameTooltip:AddLine("|cff00ccffLeft-Click:|r Toggle Master HUD", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("|cff00ccffRight-Click:|r Toggle Tabbed / Floating mode", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("|cff00ccffDrag:|r Move icon around minimap", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("|cff00ccffLeft-Click:|r Toggle Master Radar HUD", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("|cff00ccffRight-Click:|r Toggle Tabbed / Floating mode", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("|cff00ccffDrag:|r Move button around minimap", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function(self)
         GameTooltip:Hide()
     end)
+
+    -- Backwards-compatibility global alias for original autopilot scripts
+    _G["OllamaMonitorMinimapButton"] = btn
 
     UpdateMinimapPos()
     if not GetSettings().showMinimap then
@@ -3166,7 +3443,7 @@ local function InitializeMasterFrame()
             if M.watching then
                 SendAddonMessage("AFUI", "UNWATCH", "WHISPER", UnitName("player"))
             elseif M.selected then
-                SendAddonMessage("AFUI", "WATCH " .. M.selected, "WHISPER", UnitName("player"))
+                SendAddonMessage("AFUI", "WATCH\t" .. M.selected, "WHISPER", UnitName("player"))
             end
         end)
         Tooltip(followButton, "Follow camera", "Your camera follows the bot. Your own character stays where it is.")
@@ -3177,7 +3454,7 @@ local function InitializeMasterFrame()
         gotoButton:SetText("Teleport to")
         gotoButton:SetScript("OnClick", function()
             if M.selected then
-                SendAddonMessage("AFUI", "GOTO " .. M.selected, "WHISPER", UnitName("player"))
+                SendAddonMessage("AFUI", "GOTO\t" .. M.selected, "WHISPER", UnitName("player"))
             end
         end)
         Tooltip(gotoButton, "Teleport to", "Moves your character to the selected bot.")
@@ -3189,7 +3466,7 @@ local function InitializeMasterFrame()
         replanButton:SetScript("OnClick", function()
             local b = SelectedBot()
             if b then
-                SendAddonMessage("AFUI", "CMD replan " .. b.name, "WHISPER", UnitName("player"))
+                SendAddonMessage("AFUI", "CMD\treplan\t" .. b.name, "WHISPER", UnitName("player"))
             end
         end)
         Tooltip(replanButton, "Replan now", "Asks the AI model for new planning orders straight away.")
@@ -3201,7 +3478,7 @@ local function InitializeMasterFrame()
         statusButton:SetScript("OnClick", function()
             local b = SelectedBot()
             if b then
-                SendAddonMessage("AFUI", "CMD status " .. b.name, "WHISPER", UnitName("player"))
+                SendAddonMessage("AFUI", "CMD\tstatus\t" .. b.name, "WHISPER", UnitName("player"))
             end
         end)
         Tooltip(statusButton, "Status to chat", "Prints the bot's full companion & autopilot status to chat.")
@@ -3219,7 +3496,7 @@ local function InitializeMasterFrame()
                 local targetName = UnitName("target")
                 local name = (targetName and UnitIsPlayer("target")) and targetName or (M.selectedName or (BotCache and BotCache.name))
                 if name and name ~= "" then
-                    SendAddonMessage("AFUI", "CMD on " .. name, "WHISPER", UnitName("player"))
+                    SendAddonMessage("AFUI", "CMD\ton\t" .. name, "WHISPER", UnitName("player"))
                     M.listAt = 0
                 else
                     print(COLORS.ALERT .. "AzerothFriend: Select a bot or target one to turn autopilot on." .. COLORS.RESET)
@@ -3500,6 +3777,19 @@ local function InitializeMasterFrame()
     apiBody:SetJustifyV("TOP")
     apiScroll:SetScrollChild(apiBodyFrame)
 
+    -- Subtle dark background panel for scrollable master content area
+    local contentBg = _G["AzerothFriendMasterContentBg"]
+    if not contentBg then
+        contentBg = CreateFrame("Frame", "AzerothFriendMasterContentBg", AzerothFriendMasterFrame)
+        contentBg:SetPoint("TOPLEFT", 294, -144)
+        contentBg:SetPoint("BOTTOMRIGHT", -24, 42)
+        contentBg:SetFrameLevel(math.max(1, AzerothFriendMasterFrame:GetFrameLevel()))
+        if AzerothFriendMasterScrollFrame then
+            AzerothFriendMasterScrollFrame:SetFrameLevel(contentBg:GetFrameLevel() + 2)
+        end
+        FlatBackdrop(contentBg, C_THEME.side or { 0.08, 0.09, 0.11 }, 1, C_THEME.line or { 0.18, 0.20, 0.24 })
+    end
+
     -- Tab buttons (9 tabs)
     for i = 1, 9 do
         local tabIndex = i
@@ -3516,8 +3806,6 @@ local function InitializeMasterFrame()
                 end
                 local pageKey = M.pages[tabIndex]
                 if pageKey and M.selected then
-                    M.pageLines = {}
-                    M.pageText = "|cff909090Loading server " .. pageKey .. " telemetry...|r"
                     SendAddonMessage("AFUI", "PAGE\t" .. M.selected .. "\t" .. pageKey, "WHISPER", UnitName("player"))
                 end
                 RefreshMasterTab()
@@ -3527,41 +3815,12 @@ local function InitializeMasterFrame()
 
     -- Bottom Remote Control Buttons & Switches (Zero Tokens)
     if AzerothFriendBtnClaim then
-        AzerothFriendBtnClaim:SetScript("OnClick", function(self)
+        AzerothFriendBtnClaim:SetScript("OnClick", function()
             local botName = BotCache.name
-            local targetName = UnitName("target")
-            if targetName and UnitIsPlayer("target") and not UnitIsUnit("target", "player") then
-                botName = targetName
-                BotCache.name = targetName
-            end
-
-            local isCurrentlyClaimed = (tostring(BotCache.claimed):upper() == "CLAIMED")
-            if isCurrentlyClaimed then
-                BotCache.claimed = "RELEASED"
-                if self.SetChecked then self:SetChecked(nil) end
-                self:SetText("Claim: OFF")
-                SendChatMessage(".af release " .. (botName or ""))
-                print(COLORS.HEADER .. "AzerothFriend: " .. COLORS.RESET .. "Reconnected " .. (botName or "companion") .. " to the bridge with autonomy still off.")
-            else
-                -- Mutual Exclusivity: Turning Claim ON cancels Autonomy
-                local goal = AFGetGoalState and AFGetGoalState() or nil
-                if goal and goal.enabled then
-                    goal.enabled = false
-                    SendChatMessage(".af autonomy off")
-                    if AzerothFriendBtnAutonomy then
-                        if AzerothFriendBtnAutonomy.SetChecked then AzerothFriendBtnAutonomy:SetChecked(nil) end
-                        AzerothFriendBtnAutonomy:SetText("Auto: OFF")
-                    end
-                end
-
-                BotCache.claimed = "CLAIMED"
-                if self.SetChecked then self:SetChecked(1) end
-                self:SetText("|cff00ff00Claim: ON|r")
-                SendChatMessage(".af claim " .. (botName or ""))
-                print(COLORS.HEADER .. "AzerothFriend: " .. COLORS.RESET .. "Claimed " .. (botName or "companion") .. " (AzerothFriend bridge disconnected, 0 tokens).")
-            end
-
-            RefreshMasterTab()
+            if botName == "" then return end
+            local claimed = tostring(BotCache.claimed):upper() == "CLAIMED"
+            SendChatMessage((claimed and ".af release " or ".af claim ") .. botName)
+            RefreshMasterTab() -- server telemetry owns Claim/Auto mutual exclusion
         end)
         AzerothFriendBtnClaim:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -3586,16 +3845,8 @@ local function InitializeMasterFrame()
             elseif current == "high" then
                 nextTier = "low"
             end
-            BotCache.thinkingCadence = nextTier
             SendChatMessage(".af thinking " .. nextTier)
-            if nextTier == "low" then
-                self:SetText("Think: LOW")
-            elseif nextTier == "high" then
-                self:SetText("Think: HIGH")
-            else
-                self:SetText("Think: NORM")
-            end
-            print(COLORS.HEADER .. "AzerothFriend: " .. COLORS.RESET .. "Thinking cadence set to " .. COLORS.VALUE .. nextTier:upper() .. COLORS.RESET .. ".")
+            RefreshMasterTab()
         end)
         AzerothFriendBtnThinking:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -3614,12 +3865,7 @@ local function InitializeMasterFrame()
     if AzerothFriendBtnModeCombat then
         AzerothFriendBtnModeCombat:SetScript("OnClick", function()
             SendChatMessage(".af mode " .. (BotCache.name or "") .. " combat")
-            SendChatMessage(".af action follow")
-            if BotCache.name and BotCache.name ~= "" then
-                SendChatMessage("follow", "WHISPER", nil, BotCache.name)
-            end
-            BotCache.actionMode = "combat"
-            print(COLORS.ALERT .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. COLORS.ALERT .. "COMBAT" .. COLORS.RESET .. " (+follow, +grind, +combat, +loot).")
+            print(COLORS.ALERT .. "AzerothFriend: " .. COLORS.RESET .. "Action mode requested: " .. COLORS.ALERT .. "COMBAT" .. COLORS.RESET .. " (+follow, +grind, +combat, +loot).")
             RefreshMasterTab()
         end)
         AzerothFriendBtnModeCombat:SetScript("OnEnter", function(self)
@@ -3635,8 +3881,7 @@ local function InitializeMasterFrame()
     if AzerothFriendBtnModeTravel then
         AzerothFriendBtnModeTravel:SetScript("OnClick", function()
             SendChatMessage(".af mode " .. (BotCache.name or "") .. " travel")
-            BotCache.actionMode = "travel"
-            print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. COLORS.CYAN .. "TRAVEL" .. COLORS.RESET .. " (+travel, +follow, -stay).")
+            print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode requested: " .. COLORS.CYAN .. "TRAVEL" .. COLORS.RESET .. " (+travel, +follow, -stay).")
             RefreshMasterTab()
         end)
         AzerothFriendBtnModeTravel:SetScript("OnEnter", function(self)
@@ -3652,8 +3897,7 @@ local function InitializeMasterFrame()
     if AzerothFriendBtnModeIdle then
         AzerothFriendBtnModeIdle:SetScript("OnClick", function()
             SendChatMessage(".af mode " .. (BotCache.name or "") .. " idle")
-            BotCache.actionMode = "idle"
-            print(COLORS.WARNING .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. COLORS.SUCCESS .. "IDLE" .. COLORS.RESET .. " (+stay, -follow).")
+            print(COLORS.WARNING .. "AzerothFriend: " .. COLORS.RESET .. "Action mode requested: " .. COLORS.SUCCESS .. "IDLE" .. COLORS.RESET .. " (+stay, -follow).")
             RefreshMasterTab()
         end)
         AzerothFriendBtnModeIdle:SetScript("OnEnter", function(self)
@@ -3669,8 +3913,7 @@ local function InitializeMasterFrame()
     if AzerothFriendBtnModeSocial then
         AzerothFriendBtnModeSocial:SetScript("OnClick", function()
             SendChatMessage(".af mode " .. (BotCache.name or "") .. " social")
-            BotCache.actionMode = "social"
-            print(COLORS.HEADER .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. "|cFFDA70D6SOCIAL|r" .. COLORS.RESET .. " (+rpg, -grind).")
+            print(COLORS.HEADER .. "AzerothFriend: " .. COLORS.RESET .. "Action mode requested: " .. "|cFFDA70D6SOCIAL|r" .. COLORS.RESET .. " (+rpg, -grind).")
             RefreshMasterTab()
         end)
         AzerothFriendBtnModeSocial:SetScript("OnEnter", function(self)
@@ -3749,7 +3992,7 @@ local function InitializeMasterFrame()
                 SendChatMessage(".af debug")
             else
                 local s = GetSettings()
-                s.activeTab = 2
+                s.activeTab = 3
                 if AzerothFriendMasterScrollFrame then
                     AzerothFriendMasterScrollFrame:SetVerticalScroll(0)
                 end
@@ -3770,39 +4013,12 @@ local function InitializeMasterFrame()
     end
 
     if AzerothFriendBtnAutonomy then
-        AzerothFriendBtnAutonomy:SetScript("OnClick", function(self)
+        AzerothFriendBtnAutonomy:SetScript("OnClick", function()
+            if BotCache.name == "" then return end
             local goal = AFGetGoalState and AFGetGoalState() or nil
-            local enabled = (goal and goal.enabled) and true or false
-            local botName = BotCache.name or "companion"
-
-            if enabled then
-                SendChatMessage(".af autonomy off")
-                if goal then goal.enabled = false end
-                if self.SetChecked then self:SetChecked(nil) end
-                self:SetText("Auto: OFF")
-                print(COLORS.WARNING .. "AzerothFriend: " .. COLORS.RESET .. "Autonomy OFF requested for " ..
-                      botName .. " (waiting for server confirmation)." .. COLORS.RESET)
-            else
-                -- Mutual Exclusivity: Turning Autonomy ON cancels Claim
-                local isCurrentlyClaimed = (tostring(BotCache.claimed):upper() == "CLAIMED")
-                if isCurrentlyClaimed then
-                    BotCache.claimed = "RELEASED"
-                    SendChatMessage(".af release " .. (BotCache.name or ""))
-                    if AzerothFriendBtnClaim then
-                        if AzerothFriendBtnClaim.SetChecked then AzerothFriendBtnClaim:SetChecked(nil) end
-                        AzerothFriendBtnClaim:SetText("Claim: OFF")
-                    end
-                end
-
-                SendChatMessage(".af autonomy on")
-                if goal then goal.enabled = true end
-                if self.SetChecked then self:SetChecked(1) end
-                self:SetText("|cff00e5ffAuto: ON|r")
-                print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Autonomy ON requested for " ..
-                      botName .. " (requires a focused goal)." .. COLORS.RESET)
-            end
-
-            RefreshMasterTab()
+            local enabled = goal and goal.enabled
+            SendChatMessage(enabled and ".af autonomy off" or ".af autonomy on")
+            RefreshMasterTab() -- display changes only after the server accepts
         end)
         AzerothFriendBtnAutonomy:SetScript("OnEnter", function(self)
             local goal = AFGetGoalState and AFGetGoalState() or nil
@@ -3913,6 +4129,9 @@ local function InitializeMasterFrame()
         M.helloAt = GetTime()
         SendAddonMessage("AFUI", "HELLO", "WHISPER", UnitName("player"))
         M.listAt = 0
+        if (not M.selected or M.selected == "") and BotCache.guid then
+            SelectBot(BotCache.guid)
+        end
         if autoCheck then autoCheck:SetChecked(M.autoRefresh ~= false) end
         if plainCheck then plainCheck:SetChecked(M.plain or false) end
         if UpdateBotCard then UpdateBotCard() end
@@ -4053,7 +4272,7 @@ listener:SetScript("OnUpdate", function(_, elapsed)
 
             local s = GetSettings()
             local pageKey = M.pages[s.activeTab]
-            if pageKey and M.selected and (M.autoRefresh ~= false) then
+            if pageKey and tonumber(M.selected) and (M.autoRefresh ~= false) then
                 local every = 3
                 if s.activeTab == 1 then every = 1.5
                 elseif s.activeTab == 7 then every = 1.5
@@ -4073,6 +4292,17 @@ end)
 -- ----------------------------------------------------------------------------
 -- Slash Commands
 -- ----------------------------------------------------------------------------
+
+function AFShowMonitorOverview()
+    local settings = GetSettings()
+    if AzerothFriendMasterFrame:IsShown() and settings.activeTab == 1 then
+        AzerothFriendMasterFrame:Hide()
+    else
+        settings.activeTab = 1
+        AzerothFriendMasterFrame:Show()
+        RefreshMasterTab()
+    end
+end
 
 SLASH_AZEROTHFRIEND_MONITOR1 = "/afm"
 SLASH_AZEROTHFRIEND_MONITOR2 = "/afmonitor"
@@ -4266,7 +4496,7 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
                 end
             end
             BotCache.actionMode = targetMode
-            print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. targetMode:upper() .. (targetMode == "combat" and " (+follow, +grind, +combat, +loot)" or "") .. " for " .. (BotCache.name or "companion") .. ".")
+            print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode requested: " .. targetMode:upper() .. (targetMode == "combat" and " (+follow, +grind, +combat, +loot)" or "") .. " for " .. (BotCache.name or "companion") .. ".")
             RefreshMasterTab()
         else
             print(COLORS.HEADER .. "Usage: /af mode <combat|travel|idle|social>" .. COLORS.RESET)
@@ -4280,7 +4510,7 @@ SlashCmdList["AZEROTHFRIEND"] = function(arg)
             end
         end
         BotCache.actionMode = cmd
-        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode set to " .. cmd:upper() .. (cmd == "combat" and " (+follow, +grind, +combat, +loot)" or "") .. " for " .. (BotCache.name or "companion") .. ".")
+        print(COLORS.SUCCESS .. "AzerothFriend: " .. COLORS.RESET .. "Action mode requested: " .. cmd:upper() .. (cmd == "combat" and " (+follow, +grind, +combat, +loot)" or "") .. " for " .. (BotCache.name or "companion") .. ".")
         RefreshMasterTab()
     elseif cmd == "claim" then
         SendChatMessage(".af claim " .. (BotCache.name or ""))

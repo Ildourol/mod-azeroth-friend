@@ -1,6 +1,8 @@
 #include "AzerothFriendMonitor.h"
 #include "AzerothFriendAutopilot.h"
 #include "AzerothFriendConfig.h"
+#include "AzerothFriendEnvironment.h"
+#include "AzerothFriendShared.h"
 #include "AzerothFriendUtilities.h"
 
 #include "CharacterCache.h"
@@ -74,6 +76,15 @@ namespace
         return s;
     }
 
+    bool CanInspect(Player* viewer, Player* bot)
+    {
+        if (!viewer || !viewer->GetSession() || !bot || !bot->IsInWorld())
+            return false;
+        // Personal HUD access must not grant the imported GM monitor's powers.
+        return viewer->GetSession()->GetSecurity() >= SEC_GAMEMASTER ||
+               AzerothFriendShared::CanControl(viewer, bot);
+    }
+
     void SendPage(Player* to, const std::string& prefix, uint64_t guid, const std::string& page, const std::vector<std::string>& lines)
     {
         Send(to, prefix, SafeFormat("B\t{}\t{}", guid, page));
@@ -139,19 +150,25 @@ namespace
 
         if (cmd == "HELLO")
         {
-            Send(player, prefix, "H\t1");
+            Send(player, prefix, Autopilot_IsActive() ? "H\t1\tactive" : "H\t1\tinactive");
         }
         else if (cmd == "LIST")
         {
             Send(player, prefix, "LB");
             auto list = Autopilot_MonitorList();
+            size_t count = 0;
             for (const auto& row : list)
             {
+                Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(row.guid));
+                if (!CanInspect(player, bot))
+                    continue;
                 Send(player, prefix, SafeFormat("L\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                                               row.guid, row.name, uint32_t(row.level), uint32_t(row.cls),
-                                               row.zone, row.tier, row.state, row.doing));
+                                               row.guid, Clean(row.name), uint32_t(row.level), uint32_t(row.cls),
+                                               Utf8Truncate(Clean(row.zone), 48), Clean(row.tier), Clean(row.state),
+                                               Utf8Truncate(Clean(row.doing), 80)));
+                ++count;
             }
-            Send(player, prefix, SafeFormat("LZ\t{}", list.size()));
+            Send(player, prefix, SafeFormat("LZ\t{}", count));
         }
         else if (cmd == "PAGE" && parts.size() >= 3)
         {
@@ -160,20 +177,33 @@ namespace
             const std::string& pageName = parts[2];
 
             Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(guid));
-            if (!bot)
+            if (!bot || !bot->IsInWorld())
             {
                 Send(player, prefix, SafeFormat("G\t{}", guid));
+                return;
+            }
+            if (!CanInspect(player, bot))
+            {
+                Send(player, prefix, "M\tCompanion unavailable or not owned by you.");
                 return;
             }
 
             std::vector<std::string> lines;
             if (Autopilot_MonitorPage(bot, pageName, lines))
                 SendPage(player, prefix, guid, pageName, lines);
+            if (pageName == "overview")
+                AzerothFriendEnvironment::instance()->BroadcastTelemetry(bot, player);
         }
         else if (cmd == "WATCH" && parts.size() >= 2)
         {
             uint64_t guid = 0;
             try { guid = std::stoull(parts[1]); } catch (...) { return; }
+
+            if (player->GetSession()->GetSecurity() < SEC_GAMEMASTER)
+            {
+                Send(player, prefix, "W\toff\t0\t-\tGM permissions required for camera watch");
+                return;
+            }
 
             Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(guid));
             if (!bot || !bot->IsInWorld())
@@ -227,7 +257,8 @@ namespace
         {
             const std::string& sub = parts[1];
             const std::string& name = parts[2];
-            Autopilot_MonitorCommand(player, sub, name);
+            if (!Autopilot_MonitorCommand(player, sub, name))
+                Send(player, prefix, "M\tMonitor command rejected; see companion diagnostics.");
         }
     }
 }
@@ -235,7 +266,7 @@ namespace
 void Monitor_LoadConfig()
 {
     g_mc.enable      = sConfigMgr->GetOption<bool>("AzerothFriend.Monitor.Enable", true);
-    g_mc.minSecurity = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Monitor.MinSecurity", SEC_ADMINISTRATOR);
+    g_mc.minSecurity = sConfigMgr->GetOption<uint32_t>("AzerothFriend.Monitor.MinSecurity", SEC_PLAYER);
 }
 
 void Monitor_Update(uint32_t diff)
@@ -274,7 +305,7 @@ AzerothFriendMonitorScript::AzerothFriendMonitorScript()
 
 bool AzerothFriendMonitorScript::OnPlayerCanUseChat(Player* player, uint32 type, uint32 language, std::string& msg, Player* receiver)
 {
-    if (language != LANG_ADDON || type != CHAT_MSG_WHISPER || receiver != player || !player)
+    if (!player || !player->GetSession() || language != LANG_ADDON || type != CHAT_MSG_WHISPER || receiver != player)
         return true;
 
     std::string prefix;

@@ -217,7 +217,7 @@ bool AzerothFriendConfig::IsBotControlled(std::string const& botName) const
             return true;
     }
 
-    if (sAFLiveState && sAFLiveState->IsRunning())
+    if (sAFLiveState)
     {
         for (const auto& rec : sAFLiveState->GetControlledBots())
         {

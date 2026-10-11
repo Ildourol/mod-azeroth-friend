@@ -1,5 +1,6 @@
 -- Goal controls and BotBuddy-inspired command/player inspectors.
 local state = {status='Unknown', goal='', progress='', result='', history='', players=''}
+local botStates = {}
 local panel, body, goalEdit, longGoalEdit, autonomyButton
 
 -- Shared with AzerothFriendUI.lua so the HUD autonomy switch reflects server
@@ -15,6 +16,7 @@ local function settings()
     return AzerothFriendUIDB.goalPanels[key]
 end
 local function refresh()
+    if not body then return end
     local actionText = ''
     if state.suggested_actions and state.suggested_actions ~= '' then
         actionText = '\n\nSuggested Actions (AI Recommendation):\n' .. state.suggested_actions
@@ -42,6 +44,13 @@ local function refresh()
         longGoalEdit:SetText(state.long_goal)
     end
 end
+function AFSelectGoalBot(name)
+    if state.bot == name then return end
+    if state.bot then botStates[state.bot] = state end
+    state = botStates[name] or {bot=name, status='Unknown', goal='', progress='', result='', history='', players=''}
+    AzerothFriendGoalState = state
+    refresh()
+end
 function AFProcessExtension(message)
     local tag, data = message:match('^%[(FRIEND_%u+)%]%s*(.*)$')
     if tag == 'FRIEND_GOAL' then
@@ -55,6 +64,10 @@ function AFProcessExtension(message)
     return true
 end
 local function send(command)
+    local kind, rest = command:match('^(%S+)%s*(.*)$')
+    if state.bot and (kind == 'goal' or kind == 'autonomy' or kind == 'action' or kind == 'inspect') then
+        command = kind .. ' ' .. state.bot .. ' ' .. rest
+    end
     SendChatMessage('.af ' .. command, 'SAY')
 end
 local function create()

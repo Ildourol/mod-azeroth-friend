@@ -39,7 +39,7 @@ struct AutopilotMonitorRow
     std::string name;
     uint8_t     level = 0;
     uint8_t     cls   = 0;
-    uint32_t    zone  = 0;
+    std::string zone;
     std::string tier;
     std::string state;
     std::string doing;

@@ -5,11 +5,5 @@
 -- ============================================================================
 
 function ToggleAzerothFriendMonitor()
-    if AzerothFriendMasterFrame and AzerothFriendMasterFrame:IsShown() and GetSettings and GetSettings().activeTab == 1 then
-        AzerothFriendMasterFrame:Hide()
-    else
-        if GetSettings then GetSettings().activeTab = 1 end
-        if AzerothFriendMasterFrame then AzerothFriendMasterFrame:Show() end
-        if RefreshMasterTab then RefreshMasterTab() end
-    end
+    if AFShowMonitorOverview then AFShowMonitorOverview() end
 end

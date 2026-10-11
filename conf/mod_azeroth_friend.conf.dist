@@ -1164,3 +1164,16 @@ AzerothFriend.Monitor.Enable = 1
 #       Default: 0
 #
 AzerothFriend.Monitor.MinSecurity = 0
+
+# Autopilot native adapter configuration (MAF-085)
+AzerothFriend.Autopilot.Route.QueriesPerVisit = 6
+AzerothFriend.Autopilot.Route.NodeSpacing = 28
+AzerothFriend.Autopilot.Route.WaterCost = 20
+AzerothFriend.Autopilot.Travel.Flights = 1
+AzerothFriend.Autopilot.Travel.FlightMinYards = 700
+AzerothFriend.Autopilot.Travel.BoatWaitMinutes = 20
+AzerothFriend.Autopilot.Travel.RideMaxMinutes = 40
+AzerothFriend.Autopilot.Travel.StuckSeconds = 45
+AzerothFriend.Autopilot.QuestHuntMinutes = 20
+AzerothFriend.Autopilot.CommandReference = ""
+AzerothFriend.Autopilot.DeniedCommands = "logout,reset,destroy,teleport,summon,cheat,debug,cdebug,wipe,sendmail,mail,hire,give leader,guild remove,guild demote,guild promote,guild leave,log,d,do,release,leave,rpg"

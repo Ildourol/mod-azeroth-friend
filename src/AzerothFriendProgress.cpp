@@ -1,4 +1,5 @@
 #include "AzerothFriendProgress.h"
+#include "AzerothFriendLiveState.h"
 #include "AzerothFriendUtilities.h"
 
 #include "DatabaseEnv.h"
@@ -20,6 +21,45 @@ namespace
     std::vector<ProgressSnapshot>             g_pendingSnapshots;
     std::vector<ProgressEvent>                g_pendingEvents;
     std::unordered_map<uint64_t, uint32_t>    g_lastTrim;
+
+    // Bounded value-only monitor caches survive queue flushes. Durable recovery
+    // runs asynchronously; opening/polling a HUD page never waits for MySQL.
+    struct DiaryCache
+    {
+        std::vector<ProgressEvent> events; // newest first
+        std::vector<ProgressSnapshot> snapshots; // oldest first
+        uint32_t lastAccess = 0;
+        uint32_t eventsAt = 0;
+        uint32_t snapshotsAt = 0;
+        uint32_t snapshotsSince = 0;
+        uint32_t snapshotsLimit = 0;
+        bool eventsLoading = false;
+        bool snapshotsLoading = false;
+    };
+    std::unordered_map<uint64_t, DiaryCache> g_diaries;
+    constexpr size_t kMaxDiaryBots = 256;
+    constexpr uint32_t kMaxDiaryEvents = 32;
+    constexpr uint32_t kMaxDiarySnapshots = 64;
+    constexpr uint32_t kDiaryRefreshSeconds = 10;
+
+    DiaryCache& GetDiary(uint64_t botGuid, uint32_t now)
+    {
+        auto found = g_diaries.find(botGuid);
+        if (found != g_diaries.end())
+        {
+            found->second.lastAccess = now;
+            return found->second;
+        }
+        if (g_diaries.size() >= kMaxDiaryBots)
+        {
+            auto oldest = std::min_element(g_diaries.begin(), g_diaries.end(),
+                [](auto const& a, auto const& b) { return a.second.lastAccess < b.second.lastAccess; });
+            g_diaries.erase(oldest);
+        }
+        DiaryCache& cache = g_diaries[botGuid];
+        cache.lastAccess = now;
+        return cache;
+    }
 
     constexpr uint32_t kTrimEverySeconds = 3600;
     constexpr uint32_t kDay              = 86400;
@@ -226,16 +266,21 @@ namespace AzerothFriendProgress
         ProgressEvent e;
         e.botGuid = botGuid;
         e.at      = Now();
-        e.type    = std::move(type);
-        e.detail  = std::move(detail);
+        e.type    = Utf8Truncate(type, 32);
+        e.detail  = Utf8Truncate(detail, 255);
 
         std::lock_guard<std::mutex> lock(g_mutex);
+        auto& diary = GetDiary(botGuid, e.at);
+        diary.events.insert(diary.events.begin(), e);
+        if (diary.events.size() > kMaxDiaryEvents)
+            diary.events.resize(kMaxDiaryEvents);
         g_pendingEvents.push_back(std::move(e));
     }
 
     void Forget(uint64_t botGuid)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
+        g_diaries.erase(botGuid);
         g_pendingSnapshots.erase(
             std::remove_if(g_pendingSnapshots.begin(), g_pendingSnapshots.end(),
                            [botGuid](const ProgressSnapshot& s) { return s.botGuid == botGuid; }),
@@ -292,49 +337,98 @@ namespace AzerothFriendProgress
 
     std::vector<ProgressEvent> LoadEvents(uint64_t botGuid, uint32_t limit)
     {
+        limit = std::min(limit, kMaxDiaryEvents);
+        if (!limit)
+            return {};
         std::vector<ProgressEvent> out;
+        bool refresh = false;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
-            for (auto it = g_pendingEvents.rbegin(); it != g_pendingEvents.rend() && out.size() < limit; ++it)
-                if (it->botGuid == botGuid)
-                    out.push_back(*it);
+            auto& cache = GetDiary(botGuid, Now());
+            out.assign(cache.events.begin(), cache.events.begin() + std::min<size_t>(limit, cache.events.size()));
+            refresh = !cache.eventsLoading && (!cache.eventsAt || Now() - cache.eventsAt >= kDiaryRefreshSeconds);
+            if (refresh)
+                cache.eventsLoading = true;
         }
 
-        if (out.size() >= limit)
-            return out;
-
-        if (QueryResult result = CharacterDatabase.Query(
+        if (refresh)
+            sAFLiveState->SubmitAsyncQuery(SafeFormat(
                 "SELECT at, type, detail FROM azeroth_friend_autopilot_events "
                 "WHERE bot_guid = {} ORDER BY id DESC LIMIT {}",
-                botGuid, limit - static_cast<uint32_t>(out.size())))
-        {
-            do
+                botGuid, kMaxDiaryEvents), [botGuid](QueryResult result)
             {
-                Field* f = result->Fetch();
-                ProgressEvent e;
-                e.botGuid = botGuid;
-                e.at      = f[0].Get<uint32>();
-                e.type    = f[1].Get<std::string>();
-                e.detail  = f[2].Get<std::string>();
-                out.push_back(std::move(e));
-            } while (result->NextRow());
-        }
+                std::vector<ProgressEvent> loaded;
+                if (result)
+                    do
+                    {
+                        Field* f = result->Fetch();
+                        loaded.push_back({botGuid, f[0].Get<uint32>(),
+                            Utf8Truncate(f[1].Get<std::string>(), 32), Utf8Truncate(f[2].Get<std::string>(), 255)});
+                    } while (result->NextRow());
+                std::lock_guard<std::mutex> lock(g_mutex);
+                auto it = g_diaries.find(botGuid);
+                if (it == g_diaries.end())
+                    return; // evicted or deleted while the value query was in flight
+                auto& cache = it->second;
+                // Retain events queued after the query started; merge durable
+                // duplicates without dropping recent, not-yet-flushed values.
+                for (auto const& e : loaded)
+                    if (std::none_of(cache.events.begin(), cache.events.end(), [&](ProgressEvent const& existing)
+                        { return existing.at == e.at && existing.type == e.type && existing.detail == e.detail; }))
+                        cache.events.push_back(e);
+                std::stable_sort(cache.events.begin(), cache.events.end(),
+                    [](ProgressEvent const& a, ProgressEvent const& b) { return a.at > b.at; });
+                if (cache.events.size() > kMaxDiaryEvents)
+                    cache.events.resize(kMaxDiaryEvents);
+                cache.eventsLoading = false;
+                cache.eventsAt = Now();
+            });
         return out;
     }
 
     std::vector<ProgressSnapshot> LoadSnapshots(uint64_t botGuid, uint32_t sinceUnix, uint32_t limit)
     {
+        limit = std::min(limit, kMaxDiarySnapshots);
+        if (!limit)
+            return {};
         std::vector<ProgressSnapshot> out;
-        if (QueryResult result = CharacterDatabase.Query(
+        bool refresh = false;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            auto& cache = GetDiary(botGuid, Now());
+            if (cache.snapshotsSince == sinceUnix)
+                out.assign(cache.snapshots.begin(), cache.snapshots.begin() + std::min<size_t>(limit, cache.snapshots.size()));
+            refresh = !cache.snapshotsLoading && (!cache.snapshotsAt ||
+                Now() - cache.snapshotsAt >= kDiaryRefreshSeconds || cache.snapshotsSince != sinceUnix ||
+                cache.snapshotsLimit != limit);
+            if (refresh)
+                cache.snapshotsLoading = true;
+        }
+        if (refresh)
+            sAFLiveState->SubmitAsyncQuery(SafeFormat(
                 "SELECT {} FROM azeroth_friend_autopilot_snapshots "
                 "WHERE bot_guid = {} AND taken_at >= {} ORDER BY taken_at ASC LIMIT {}",
-                SnapshotColumns(), botGuid, sinceUnix, limit))
-        {
-            do
+                SnapshotColumns(), botGuid, sinceUnix, limit), [botGuid, sinceUnix, limit](QueryResult result)
             {
-                out.push_back(ReadSnapshot(result->Fetch(), botGuid));
-            } while (result->NextRow());
-        }
+                std::vector<ProgressSnapshot> loaded;
+                if (result)
+                    do
+                    {
+                        auto snapshot = ReadSnapshot(result->Fetch(), botGuid);
+                        snapshot.professions = Utf8Truncate(snapshot.professions, 512);
+                        loaded.push_back(std::move(snapshot));
+                    } while (result->NextRow());
+                std::lock_guard<std::mutex> lock(g_mutex);
+                auto it = g_diaries.find(botGuid);
+                if (it == g_diaries.end())
+                    return;
+                auto& cache = it->second;
+                cache.snapshots = std::move(loaded);
+                cache.snapshotsLoading = false;
+                cache.snapshotsSince = sinceUnix;
+                cache.snapshotsLimit = limit;
+                cache.snapshotsAt = Now();
+            });
         return out;
     }
 

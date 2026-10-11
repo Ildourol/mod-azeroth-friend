@@ -441,9 +441,9 @@
                         <Layers>
                             <Layer level="ARTWORK">
                                 <FontString name="AzerothFriendMasterHTMLText" inherits="GameFontHighlightSmall" justifyH="LEFT" justifyV="TOP">
-                                    <Size><AbsDimension x="650" y="0"/></Size>
+                                    <Size><AbsDimension x="646" y="460"/></Size>
                                     <Anchors>
-                                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                                        <Anchor point="TOPLEFT" x="4" y="-4"/>
                                     </Anchors>
                                 </FontString>
                             </Layer>

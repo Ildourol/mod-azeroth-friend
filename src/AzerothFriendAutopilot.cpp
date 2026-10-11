@@ -1,12 +1,15 @@
 #include "AzerothFriendAutopilot.h"
 #include "AzerothFriendAutopilotSchema.h"
+#include "AzerothFriendActionDispatcher.h"
 #include "AzerothFriendConfig.h"
 #include "AzerothFriendErrands.h"
+#include "AzerothFriendEnvironment.h"
 #include "AzerothFriendLiveState.h"
 #include "AzerothFriendMovement.h"
 #include "AzerothFriendProgress.h"
 #include "AzerothFriendRoute.h"
 #include "AzerothFriendStrategy.h"
+#include "AzerothFriendShared.h"
 #include "AzerothFriendTravel.h"
 #include "AzerothFriendUtilities.h"
 #include "AzerothFriendWorldIndex.h"
@@ -32,6 +35,7 @@
 #include "SharedDefines.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
+#include "World.h"
 
 #if __has_include("Playerbots.h")
     #include "Playerbots.h"
@@ -274,6 +278,12 @@ namespace
 
     void SweepBot(Player* bot, uint32_t now)
     {
+        if (!bot || !bot->IsInWorld())
+            return;
+        AzerothFriend::BotControlRecord control;
+        if (sAFLiveState->GetBotControl(bot->GetGUID().GetCounter(), control) &&
+            (!control.bridgeEnabled || control.mode == "claimed"))
+            return; // manual owner control supersedes imported background behavior
         const uint64_t guid = bot->GetGUID().GetRawValue();
         std::lock_guard<std::mutex> lock(g_mutex);
 
@@ -519,7 +529,7 @@ std::vector<AutopilotMonitorRow> Autopilot_MonitorList()
         for (const auto& [guid, r] : g_rows)
         {
             Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(guid));
-            if (!bot)
+            if (!bot || !bot->IsInWorld())
                 continue;
 
             seen.insert(guid);
@@ -528,7 +538,8 @@ std::vector<AutopilotMonitorRow> Autopilot_MonitorList()
             row.name  = bot->GetName();
             row.level = bot->GetLevel();
             row.cls   = bot->getClass();
-            row.zone  = bot->GetZoneId();
+            AreaTableEntry const* zoneEntry = sAreaTableStore.LookupEntry(bot->GetZoneId());
+            row.zone  = zoneEntry ? zoneEntry->area_name[sWorld->GetDefaultDbcLocale()] : "World";
             row.doing = r.doing.empty() ? "Adventuring" : r.doing;
 
             auto onIt = g_online.find(guid);
@@ -568,7 +579,7 @@ std::vector<AutopilotMonitorRow> Autopilot_MonitorList()
     for (const auto& ctrl : controlled)
     {
         Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid::Create<HighGuid::Player>(ctrl.botGuid));
-        if (!bot)
+        if (!bot || !bot->IsInWorld())
             continue;
 
         uint64_t guid = bot->GetGUID().GetRawValue();
@@ -581,7 +592,8 @@ std::vector<AutopilotMonitorRow> Autopilot_MonitorList()
         row.name  = bot->GetName();
         row.level = bot->GetLevel();
         row.cls   = bot->getClass();
-        row.zone  = bot->GetZoneId();
+        AreaTableEntry const* zoneEntry = sAreaTableStore.LookupEntry(bot->GetZoneId());
+        row.zone  = zoneEntry ? zoneEntry->area_name[sWorld->GetDefaultDbcLocale()] : "World";
         row.doing = ctrl.currentGoal.empty() ? "Idle" : ctrl.currentGoal;
         row.tier  = ctrl.autonomyEnabled ? "background" : "dormant";
 
@@ -608,7 +620,7 @@ std::vector<AutopilotMonitorRow> Autopilot_MonitorList()
 
 bool Autopilot_MonitorPage(Player* bot, const std::string& page, std::vector<std::string>& lines)
 {
-    if (!bot)
+    if (!bot || !bot->IsInWorld())
         return false;
 
     const uint64_t guid = bot->GetGUID().GetRawValue();
@@ -713,8 +725,11 @@ bool Autopilot_MonitorPage(Player* bot, const std::string& page, std::vector<std
             lines.push_back("  (no progress diary events yet)");
         else
         {
-            for (const auto& e : events)
+            for (auto it = events.rbegin(); it != events.rend(); ++it)
+            {
+                const auto& e = *it;
                 lines.push_back("  [" + e.type + "] " + e.detail);
+            }
         }
         return true;
     }
@@ -725,15 +740,58 @@ bool Autopilot_MonitorPage(Player* bot, const std::string& page, std::vector<std
 
 bool Autopilot_MonitorCommand(Player* gm, const std::string& sub, const std::string& name)
 {
-    if (!gm)
+    if (!gm || !gm->IsInWorld() || !gm->GetSession())
         return false;
 
     Player* bot = ObjectAccessor::FindPlayerByName(name, false);
-    if (!bot || !IsBotPlayer(bot))
+    if (!bot || !bot->IsInWorld() || !IsBotPlayer(bot))
     {
-        ChatHandler(gm->GetSession()).SendSysMessage("Bot not found or not a valid playerbot.");
+        AzerothFriendShared::SendAddonError(gm, "Bot not found or not a valid playerbot.", name);
         return false;
     }
+
+    bool const isGm = gm->GetSession()->GetSecurity() >= SEC_GAMEMASTER;
+    if (!isGm && !AzerothFriendShared::CanControl(gm, bot))
+    {
+        AzerothFriendShared::SendAddonError(gm, "Companion unavailable or not owned by you.", name);
+        return false;
+    }
+    if (sub == "status")
+    {
+        AzerothFriendEnvironment::instance()->BroadcastTelemetry(bot, gm);
+        return true;
+    }
+    if (sub == "replan" || sub == "plan")
+    {
+        uint32 const botGuid = bot->GetGUID().GetCounter();
+        if (!sAFLiveState->IsBotBridgeEnabled(botGuid))
+        {
+            AzerothFriendShared::SendAddonError(gm, "Release the companion claim before requesting a replan.", name);
+            return false;
+        }
+        // A diary entry is not a planner input. Preserve owner provenance and
+        // invalidate old steps before sending the request to the Python mind.
+        AzerothFriendShared::InvalidateControl(bot);
+        sAFDispatcher->InterruptBotPlan(botGuid, "Owner requested immediate replan", false);
+        AzerothFriendShared::QueueEvent(botGuid, "player_command", 1,
+            gm->GetGUID().GetCounter(), gm->GetName(),
+            "{\"text\":\"Replan and carry out my current objective using native playerbot actions.\",\"channel\":\"command\"}");
+        AzerothFriendProgress::QueueEvent(bot->GetGUID().GetRawValue(), "replan", "Owner requested immediate replan");
+        return true;
+    }
+    if (!isGm)
+    {
+        AzerothFriendShared::SendAddonError(gm, "GM permissions required to change autopilot enrollment; use companion Auto for personal autonomy.", name);
+        return false;
+    }
+    if (sub != "on" && sub != "off")
+    {
+        AzerothFriendShared::SendAddonError(gm, "Unknown monitor command.", name);
+        return false;
+    }
+
+    AzerothFriendShared::InvalidateControl(bot);
+    sAFDispatcher->InterruptBotPlan(bot->GetGUID().GetCounter(), "Operator changed autopilot enrollment", false);
 
     const uint64_t guid = bot->GetGUID().GetRawValue();
     std::lock_guard<std::mutex> lock(g_mutex);
