@@ -2,6 +2,13 @@
 
 An autonomous AI companion module, Python reasoning bridge, and WoW 3.3.5a client HUD for AzerothCore + mod-playerbots.
 
+> [!IMPORTANT]
+> **Branch Note: `mod-azeroth-friend-autopilot` (Experimental Branch)**
+>
+> This branch is an **experimental development branch** containing autonomous autopilot capabilities, procedural world errands, Dijkstra multi-hop travel routing, passer-by social embodiment, and the unified 9-tab `AzerothFriendUI` master monitor HUD.
+>
+> For the stable baseline companion release, refer to the `master` branch.
+
 ![AzerothFriend Companion Banner](assets/azeroth_friend_banner.jpg)
 
 ---
