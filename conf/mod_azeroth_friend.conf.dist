@@ -12,9 +12,9 @@
 #
 #   AzerothFriend.Enable
 #       Enable or disable the AzerothFriend module in C++
-#       Default: 1 (enabled)
+#       Default: 0 (disabled)
 #
-AzerothFriend.Enable = 1
+AzerothFriend.Enable = 0
 
 #
 #   AzerothFriend.Debug

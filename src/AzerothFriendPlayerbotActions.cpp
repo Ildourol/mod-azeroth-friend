@@ -138,7 +138,7 @@ namespace AzerothFriendPlayerbotActions
             return false;
 
         std::vector<std::string> parts;
-        std::string const separator = sPlayerbotAIConfig.commandSeparator;
+        std::string const separator = sPlayerbotAIConfig.CommandSeparator;
         if (!separator.empty() && command.find(separator) != std::string::npos)
         {
             std::vector<std::string> dest;
@@ -214,7 +214,7 @@ namespace AzerothFriendPlayerbotActions
         if (probe.find('\n') != std::string::npos || probe.find('\r') != std::string::npos)
             return true;
 #if AF_HAS_PLAYERBOTS
-        std::string separator = sPlayerbotAIConfig.commandSeparator;
+        std::string separator = sPlayerbotAIConfig.CommandSeparator;
         if (!separator.empty() && probe.find(separator) != std::string::npos)
         {
             size_t start = 0, end;
@@ -343,7 +343,7 @@ namespace AzerothFriendPlayerbotActions
 
         ss << "supported_actions=" << SupportedActions(bot).size()
            << " supported_strategies=" << SupportedStrategies(bot).size()
-           << " command_separator='" << sPlayerbotAIConfig.commandSeparator << "'";
+           << " command_separator='" << sPlayerbotAIConfig.CommandSeparator << "'";
 #else
         (void)bot;
         ss << "mod-playerbots not compiled in";
