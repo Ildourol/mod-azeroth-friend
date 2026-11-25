@@ -555,10 +555,10 @@ namespace AzerothFriend
         if (sAzerothFriendConfig->liveStateSecret.empty())
         {
             // No shared secret means no authenticated bridge connection can exist.
-            // Leave the service stopped so the module keeps the SQL compatibility
-            // path instead of publishing into a listener nobody can use.
+            // Keep RAM caches and deterministic owner commands available. SQL
+            // compatibility is an explicit option, never an automatic fallback.
             LOG_WARN("server.loading", "[AzerothFriend] Live-state transport not started: "
-                     "AzerothFriend.LiveState.Secret is empty. Running in SQL compatibility mode.");
+                     "AzerothFriend.LiveState.Secret is empty. New LLM planning requires an authenticated live-state connection.");
             return;
         }
         if (_running.load())

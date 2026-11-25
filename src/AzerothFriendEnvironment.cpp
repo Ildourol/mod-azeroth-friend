@@ -712,6 +712,7 @@ void AzerothFriendEnvironment::BroadcastTelemetry(Player* bot, Player* targetPla
     // 1. FRIEND_STATE
     std::ostringstream statePayload;
     statePayload << "Name: " << bot->GetName()
+                 << "|Guid: " << botGuid
                  << "|Race: " << (uint32)bot->getRace()
                  << "|Class: " << (uint32)bot->getClass()
                  << "|Level: " << (uint32)bot->GetLevel()
@@ -781,7 +782,7 @@ void AzerothFriendEnvironment::BroadcastTelemetry(Player* bot, Player* targetPla
     uint32 tokensSaved = 0;
     uint32 coProc = 0;
     uint32 sensReused = 0;
-    if (sAFLiveState->IsRunning())
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
     {
         AzerothFriend::TelemetryCounters counters = sAFLiveState->GetTelemetry();
         coProc = counters.coProcessed;
@@ -847,7 +848,7 @@ void AzerothFriendEnvironment::BroadcastTelemetry(Player* bot, Player* targetPla
     AzerothFriendShared::SendTelemetry(bot, "FRIEND_API", apiPayload.str(), targetPlayer);
 
     // Goal telemetry: RAM control record first, SQL only in rollback mode.
-    if (sAFLiveState->IsRunning())
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
     {
         AzerothFriend::BotControlRecord control;
         if (sAFLiveState->GetBotControl(botGuid, control))
@@ -883,7 +884,7 @@ void AzerothFriendEnvironment::BroadcastTelemetry(Player* bot, Player* targetPla
 
     // Recent action history: served from RAM (asynchronously refreshed) so the
     // world thread never blocks on a row scan.
-    if (sAFLiveState->IsRunning())
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
     {
         AzerothFriendShared::SendTelemetry(bot, "FRIEND_HISTORY", sAFLiveState->GetHistory(botGuid), targetPlayer);
     }
@@ -917,7 +918,7 @@ void AzerothFriendEnvironment::BroadcastTelemetry(Player* bot, Player* targetPla
 
     // 3b. FRIEND_THOUGHT (Real-time live thoughts & reasoning from cognitive planner)
     std::string curThought;
-    if (sAFLiveState->IsRunning())
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
     {
         curThought = sAFLiveState->GetThought(botGuid);
     }
@@ -1037,7 +1038,7 @@ void AzerothFriendEnvironment::BroadcastTelemetry(Player* bot, Player* targetPla
 
     // 5. FRIEND_DIAG: server-owned RAM freshness, transport status, context size
     //    and summary timestamps. The addon only renders these values.
-    if (sAFLiveState->IsRunning())
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
     {
         AzerothFriend::LiveStateStatus status = sAFLiveState->GetStatus();
         AzerothFriend::BridgeDiagnostics diagnostics = sAFLiveState->GetBridgeDiagnostics();

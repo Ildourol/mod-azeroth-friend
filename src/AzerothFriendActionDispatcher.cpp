@@ -474,7 +474,7 @@ void AzerothFriendActionDispatcher::Update(uint32 diff)
     }
 
     uint32 activeControlled = 0;
-    if (sAFLiveState->IsRunning())
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
     {
         // RAM-first: the bot table is read asynchronously once per cache window.
         for (AzerothFriend::BotControlRecord const& record : sAFLiveState->GetControlledBots())
@@ -512,7 +512,9 @@ void AzerothFriendActionDispatcher::Update(uint32 diff)
     }
 
     // Explicit SQL compatibility mode (rollback path): synchronous reads stay
-    // available only while the RAM-first service is disabled.
+    // available only when the operator explicitly enabled the rollback option.
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
+        return;
     QueryResult result = CharacterDatabase.Query(
         "SELECT bot_guid, mode, autonomy_enabled, goal_status, bridge_enabled "
         "FROM azeroth_friend_bots WHERE enabled = 1 ORDER BY bot_guid");
@@ -563,7 +565,7 @@ void AzerothFriendActionDispatcher::Update(uint32 diff)
  */
 void AzerothFriendActionDispatcher::RefreshDispatcherCaches(bool force)
 {
-    if (!sAFLiveState->IsRunning())
+    if (sAzerothFriendConfig->sqlCompatibilityMode)
         return;
 
     time_t now = time(nullptr);
@@ -1294,6 +1296,8 @@ void AzerothFriendActionDispatcher::StartClaimedStep(Player* bot, BotClaimedStep
 
 void AzerothFriendActionDispatcher::ProcessBotActionsLegacy(Player* bot, std::string const& /*botMode*/)
 {
+    if (!bot || !bot->IsInWorld() || !sAzerothFriendConfig->sqlCompatibilityMode)
+        return;
     uint32 botGuid = bot->GetGUID().GetCounter();
     time_t now = time(nullptr);
 
@@ -3470,6 +3474,41 @@ bool AzerothFriendActionDispatcher::TryBuildStep(Player* bot, std::string const&
         return true;
     }
 
+    // ---------------------------------------------------------------- autopilot
+    // Stage 0 containment (P0-01 / P2-14): explicit unsupported checks until real vertical slice execution handlers exist
+    if (actionType == "goto_service")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_npc")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_player")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_zone")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_hunt")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "goto_mailbox")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "quest_do")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "ah_look")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "ah_sell")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "ah_buy")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "disenchant")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "open")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_invite")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_accept")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_decline")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+    if (actionType == "group_share")
+        return Fail("unsupported_in_current_version: '" + actionType + "' is not currently executable");
+
     return Fail("unhandled_action '" + actionType + "'");
 }
 
@@ -3485,7 +3524,7 @@ void AzerothFriendActionDispatcher::EmitAutonomyTick(Player* bot, std::string co
     if (_activeActions.count(botGuid))
         return;
 
-    if (sAFLiveState->IsRunning())
+    if (!sAzerothFriendConfig->sqlCompatibilityMode)
     {
         // RAM-first: pending events and active plans come from value caches that
         // are refreshed asynchronously, so no query runs inside the world tick.

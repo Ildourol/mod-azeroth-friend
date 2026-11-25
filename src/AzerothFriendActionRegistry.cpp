@@ -304,11 +304,30 @@ namespace AzerothFriendActionRegistry
                 { "pvp",                 "social", "",                       "Toggle PvP flag through the native playerbot command surface.", "flag pvp toggle", false },
                 { "roll",                "social", "[item]",                 "Roll on the pending loot or linked item.", "roll", false },
 
+                // Autopilot Errands & Operations
+                { "goto_service",        "autopilot", "service",             "Walk to nearest repair/vendor/trainer/profession/inn/flightmaster/bank/auction.", "go", false },
+                { "goto_npc",            "autopilot", "name",                "Walk to named NPC across zones.", "go", false },
+                { "goto_player",         "autopilot", "name",                "Pathfind to player character.", "go", false },
+                { "goto_zone",           "autopilot", "zone",                "Walk/fly/ride to zone hub.", "go", false },
+                { "goto_hunt",           "autopilot", "",                    "Hunt level-appropriate monsters.", "grind", false },
+                { "goto_mailbox",        "autopilot", "",                    "Walk to nearest mailbox.", "go", false },
+                { "quest_do",            "autopilot", "quest_id,[reward]",   "Walk to quest objective or turn in completed quest.", "", false },
+                { "ah_look",             "autopilot", "item",                "Query auction house for item.", "ah", false },
+                { "ah_sell",             "autopilot", "item,price",          "Sell item on auction house.", "ah", false },
+                { "ah_buy",              "autopilot", "item",                "Buy item on auction house.", "ah", false },
+                { "disenchant",          "autopilot", "item",                "Disenchant inventory item.", "", false },
+                { "open",                "autopilot", "guid",                "Open gameobject or container.", "use", false },
+                { "group_invite",        "autopilot", "player",              "Invite player to group.", "invite", false },
+                { "group_accept",        "autopilot", "",                    "Accept pending group invite.", "accept invite", false },
+                { "group_decline",       "autopilot", "",                    "Decline pending group invite.", "decline invite", false },
+                { "group_share",         "autopilot", "",                    "Share current quest with party.", "share", false },
+
                 // Meta
                 { "playerbot_action",    "meta", "action,[param]",           "Escape hatch: run ANY action registered by mod-playerbots (validated against the bot's own action list).", "", true },
                 { "playerbot_command",   "meta", "command",                  "Escape hatch: send a raw playerbot chat command (separator aware, denylist filtered).", "", true },
                 { "wait",                "meta", "seconds",                  "Pause the plan for N seconds.", "delay", false },
             };
+
 
             static std::string const resultSchema =
                 "{\"type\":\"object\",\"required\":[\"api_version\",\"capability\",\"status\",\"verified\"],"
